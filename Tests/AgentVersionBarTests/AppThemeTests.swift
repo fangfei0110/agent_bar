@@ -20,6 +20,15 @@ struct AppThemeTests {
     }
 
     @Test
+    func panelCardsRelyOnTrailingStatusBadgeOnly() {
+        #expect(VersionStatus.upToDate.showsLeadingPanelStatusIcon == false)
+        #expect(VersionStatus.updateAvailable.showsLeadingPanelStatusIcon == false)
+        #expect(VersionStatus.currentOnly.showsLeadingPanelStatusIcon == false)
+        #expect(VersionStatus.latestOnly.showsLeadingPanelStatusIcon == false)
+        #expect(VersionStatus.unavailable.showsLeadingPanelStatusIcon == false)
+    }
+
+    @Test
     func appThemeUsesWarmLightPalette() {
         let warm = AppTheme.palette(for: .warm)
 

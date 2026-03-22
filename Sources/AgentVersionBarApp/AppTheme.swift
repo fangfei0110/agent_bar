@@ -193,6 +193,10 @@ enum AppTheme {
 }
 
 extension VersionStatus {
+    var showsLeadingPanelStatusIcon: Bool {
+        false
+    }
+
     var dashboardAccent: DashboardAccent {
         switch self {
         case .upToDate:

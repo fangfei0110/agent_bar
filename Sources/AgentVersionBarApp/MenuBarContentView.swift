@@ -173,14 +173,16 @@ private struct ProviderCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(snapshot.status.dashboardAccent.softFill)
-                        .frame(width: 34, height: 34)
+                if snapshot.status.showsLeadingPanelStatusIcon {
+                    ZStack {
+                        Circle()
+                            .fill(snapshot.status.dashboardAccent.softFill)
+                            .frame(width: 34, height: 34)
 
-                    Image(systemName: snapshot.status.dashboardSymbol)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(snapshot.status.dashboardAccent.color)
+                        Image(systemName: snapshot.status.dashboardSymbol)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(snapshot.status.dashboardAccent.color)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
