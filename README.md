@@ -1,4 +1,4 @@
-# Agent Version Bar
+# Agent Bar
 
 Lightweight macOS menu bar app for tracking installed and latest versions of:
 
