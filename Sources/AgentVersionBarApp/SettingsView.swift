@@ -370,7 +370,7 @@ struct SettingsView: View {
                 .foregroundStyle(theme.tertiaryText)
 
             Text(value)
-                .font(.system(size: 12.5, weight: .bold, design: .monospaced))
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
                 .foregroundStyle(role == .available && status == .updateAvailable ? theme.updateHighlight : theme.strongText)
                 .lineLimit(1)
         }

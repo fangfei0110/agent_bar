@@ -278,7 +278,7 @@ private struct MetricBlock: View {
                 .foregroundStyle(theme.tertiaryText)
 
             Text(value)
-                .font(.system(size: 12.5, weight: valueWeight, design: .monospaced))
+                .font(.system(size: 12, weight: valueWeight, design: .monospaced))
                 .foregroundStyle(valueColor)
                 .lineLimit(1)
         }
