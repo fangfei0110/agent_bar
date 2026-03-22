@@ -92,4 +92,41 @@ struct VersionRefreshServiceTests {
         #expect(snapshot.terminalUpdateCommand == ["/usr/local/bin/openclaw", "update"])
         #expect(snapshot.checkedAt == Date(timeIntervalSince1970: 100))
     }
+
+    @Test
+    func refreshUsesPackageManagerUpdateCommandForCodexCLI() {
+        let service = VersionRefreshService(
+            commandRunner: { command in
+                if command == ["/usr/bin/which", "codex"] {
+                    return CommandOutput(
+                        exitCode: 0,
+                        stdout: "/usr/local/lib/node_modules/@openai/codex/bin/codex.js\n",
+                        stderr: ""
+                    )
+                }
+
+                if command == ["/usr/local/lib/node_modules/@openai/codex/bin/codex.js", "--version"] {
+                    return CommandOutput(exitCode: 0, stdout: "codex-cli 0.116.0\n", stderr: "")
+                }
+
+                if command == ["npm", "view", "@openai/codex", "version"] {
+                    return CommandOutput(exitCode: 0, stdout: "0.117.0\n", stderr: "")
+                }
+
+                return CommandOutput(exitCode: 1, stdout: "", stderr: "unexpected")
+            },
+            dateProvider: { Date(timeIntervalSince1970: 200) }
+        )
+
+        let snapshot = service.refresh(provider: .codexCli)
+
+        #expect(snapshot.currentVersion == "0.116.0")
+        #expect(snapshot.latestVersion == "0.117.0")
+        #expect(snapshot.installSource == .npm)
+        #expect(snapshot.status == .updateAvailable)
+        #expect(snapshot.updateMethodTitle == "npm install -g @openai/codex@latest")
+        #expect(snapshot.terminalUpdateCommand == ["npm", "install", "-g", "@openai/codex@latest"])
+        #expect(snapshot.configPath == "\(NSHomeDirectory())/.codex/config.toml")
+        #expect(snapshot.checkedAt == Date(timeIntervalSince1970: 200))
+    }
 }

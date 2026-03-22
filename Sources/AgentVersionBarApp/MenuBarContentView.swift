@@ -5,128 +5,240 @@ struct MenuBarContentView: View {
     @ObservedObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
 
+    private var theme: ThemePalette { model.themePalette }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             header
 
             if model.visibleSnapshots.isEmpty {
-                Text("No agents are visible. Re-enable them in Settings > Preference.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 12)
+                emptyState
             } else {
-                ForEach(model.visibleSnapshots) { snapshot in
-                    ProviderCard(snapshot: snapshot, model: model)
-                }
-            }
-
-            Divider()
-
-            HStack(spacing: 8) {
-                Button(model.isRefreshing ? "Refreshing..." : "Refresh") {
-                    Task {
-                        await model.refresh()
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(model.visibleSnapshots) { snapshot in
+                        ProviderCard(snapshot: snapshot, model: model, theme: theme)
                     }
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isRefreshing)
-
-                Button("Settings") {
-                    NSApplication.shared.activate(ignoringOtherApps: true)
-                    openWindow(id: SettingsView.windowID)
-                }
-                .buttonStyle(.bordered)
-
-                Spacer()
-
-                Button("Quit") {
-                    NSApplication.shared.terminate(nil)
-                }
-                .buttonStyle(.bordered)
             }
+
+            actionBar
         }
-        .padding(14)
-        .frame(width: 380)
+        .padding(12)
+        .frame(width: 424)
+        .dashboardPanelBackground(theme: theme)
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Agent Bar")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Agent Bar")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(theme.strongText)
+
+                    Text("Version visibility for local coding agents")
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryText)
+                }
+
+                Spacer()
+
+                ThemeMenuButton(model: model, theme: theme)
+
+                DashboardPill(
+                    title: model.isRefreshing ? "Refreshing" : "Live",
+                    systemImage: model.isRefreshing ? "arrow.triangle.2.circlepath.circle.fill" : "bolt.horizontal.circle.fill",
+                    accent: .info,
+                    theme: theme
+                )
+            }
 
             HStack(spacing: 8) {
                 TimelineView(.periodic(from: .now, by: 30)) { context in
-                    HeaderBadge(title: "Checked \(model.checkedAtTitle(relativeTo: context.date))", tint: .blue)
+                    DashboardPill(
+                        title: "Checked \(model.checkedAtTitle(relativeTo: context.date))",
+                        systemImage: "clock.fill",
+                        accent: .muted,
+                        theme: theme
+                    )
                 }
-                HeaderBadge(title: "Auto \(model.refreshInterval.compactTitle)", tint: .gray)
-                if model.outdatedCount > 0 {
-                    HeaderBadge(title: "\(model.outdatedCount) updates", tint: .orange)
-                }
+
+                DashboardPill(
+                    title: "Auto \(model.refreshInterval.compactTitle)",
+                    systemImage: "timer",
+                    accent: .info,
+                    theme: theme
+                )
+
+                DashboardPill(
+                    title: "\(model.outdatedCount) updates",
+                    systemImage: model.outdatedCount == 0 ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
+                    accent: model.outdatedCount == 0 ? .success : .warning,
+                    theme: theme
+                )
             }
         }
+    }
+
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Nothing on the panel")
+                .font(.headline)
+                .foregroundStyle(theme.strongText)
+
+            Text("No agents are visible right now. Re-enable them in Settings > Preference.")
+                .font(.caption)
+                .foregroundStyle(theme.secondaryText)
+        }
+        .dashboardCard(theme: theme, padding: 14)
+    }
+
+    private var actionBar: some View {
+        HStack(spacing: 10) {
+            PanelActionButton(
+                title: model.isRefreshing ? "Refreshing..." : "Refresh",
+                systemImage: "arrow.clockwise",
+                prominence: .primary,
+                theme: theme
+            ) {
+                Task {
+                    await model.refresh()
+                }
+            }
+            .disabled(model.isRefreshing)
+
+            PanelActionButton(
+                title: "Settings",
+                systemImage: "slider.horizontal.3",
+                prominence: .secondary,
+                theme: theme
+            ) {
+                NSApplication.shared.activate(ignoringOtherApps: true)
+                openWindow(id: SettingsView.windowID)
+            }
+
+            Spacer(minLength: 0)
+
+            PanelActionButton(
+                title: "Quit",
+                systemImage: "xmark.circle",
+                prominence: .quiet,
+                theme: theme
+            ) {
+                NSApplication.shared.terminate(nil)
+            }
+        }
+        .dashboardCard(theme: theme, padding: 10)
+    }
+}
+
+private struct ThemeMenuButton: View {
+    @ObservedObject var model: AppModel
+    let theme: ThemePalette
+
+    var body: some View {
+        Menu {
+            ForEach(AppThemeStyle.allCases) { style in
+                Button {
+                    model.themeStyle = style
+                } label: {
+                    Label(style.displayTitle, systemImage: model.themeStyle == style ? "checkmark" : style.systemImage)
+                }
+            }
+        } label: {
+            Image(systemName: model.themeStyle.systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(theme.secondaryText)
+                .frame(width: 30, height: 30)
+                .background(
+                    Circle()
+                        .fill(theme.secondaryButtonFill)
+                )
+                .overlay(
+                    Circle()
+                        .strokeBorder(theme.heavyStroke, lineWidth: 1)
+                )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .help("Theme")
     }
 }
 
 private struct ProviderCard: View {
     let snapshot: ProviderVersionSnapshot
     @ObservedObject var model: AppModel
+    let theme: ThemePalette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(snapshot.status.dashboardAccent.softFill)
+                        .frame(width: 34, height: 34)
+
+                    Image(systemName: snapshot.status.dashboardSymbol)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(snapshot.status.dashboardAccent.color)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
                     Text(snapshot.provider.displayName)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(theme.strongText)
+
                     Text(snapshot.installSource.displayTitle)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
                 }
 
                 Spacer()
 
-                HeaderBadge(title: snapshot.status.displayTitle, tint: tint)
+                DashboardPill(
+                    title: snapshot.status.displayTitle,
+                    systemImage: snapshot.status.dashboardSymbol,
+                    accent: snapshot.status.dashboardAccent,
+                    theme: theme
+                )
             }
 
-            HStack(spacing: 12) {
-                MetricBlock(title: "Installed", value: snapshot.currentTitle)
-                MetricBlock(title: "Available", value: snapshot.latestTitle)
+            HStack(spacing: 10) {
+                MetricBlock(title: "Installed", value: snapshot.currentTitle, theme: theme)
+                MetricBlock(title: "Available", value: snapshot.latestTitle, theme: theme)
             }
 
-            HStack {
-                Button(model.isUpdating(snapshot.provider) ? "Updating..." : "Update") {
+            HStack(spacing: 10) {
+                PanelActionButton(
+                    title: model.isUpdating(snapshot.provider) ? "Updating..." : "Update",
+                    systemImage: "arrow.up.circle",
+                    prominence: isUpdateEnabled ? .primary : .secondary,
+                    theme: theme
+                ) {
                     model.update(snapshot.provider)
                 }
-                .buttonStyle(.bordered)
                 .disabled(isUpdateEnabled == false || model.isUpdating(snapshot.provider))
 
-                Spacer()
-            }
+                if snapshot.errorDescription != nil {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(DashboardAccent.warning.color)
+                        Text(snapshot.errorTitle)
+                            .font(.caption)
+                            .foregroundStyle(theme.secondaryText)
+                            .lineLimit(1)
+                    }
+                } else {
+                    Text(snapshot.installMethodTitle)
+                        .font(.caption)
+                        .foregroundStyle(theme.tertiaryText)
+                        .lineLimit(1)
+                }
 
-            if snapshot.errorDescription != nil {
-                Text(snapshot.errorTitle)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .lineLimit(1)
+                Spacer(minLength: 0)
             }
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-    }
-
-    private var tint: Color {
-        switch snapshot.status {
-        case .upToDate:
-            return .green
-        case .updateAvailable:
-            return .orange
-        case .currentOnly, .latestOnly:
-            return .blue
-        case .unavailable:
-            return .gray
-        }
+        .dashboardCard(theme: theme, accent: snapshot.status.dashboardAccent, padding: 12)
     }
 
     private var isUpdateEnabled: Bool {
@@ -137,33 +249,115 @@ private struct ProviderCard: View {
 private struct MetricBlock: View {
     let title: String
     let value: String
+    let theme: ThemePalette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .tracking(0.8)
+                .foregroundStyle(theme.tertiaryText)
+
             Text(value)
-                .font(.caption.weight(.medium))
+                .font(.system(.caption, design: .monospaced).weight(.medium))
+                .foregroundStyle(theme.strongText)
                 .lineLimit(1)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .dashboardMetricTile(theme: theme)
     }
 }
 
-private struct HeaderBadge: View {
+private struct DashboardPill: View {
     let title: String
-    let tint: Color
+    let systemImage: String
+    let accent: DashboardAccent
+    let theme: ThemePalette
 
     var body: some View {
-        Text(title)
+        Label(title, systemImage: systemImage)
             .font(.caption.weight(.semibold))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .foregroundStyle(accent.color)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
             .background(
                 Capsule(style: .continuous)
-                    .fill(tint.opacity(0.12))
+                    .fill(accent.softFill)
             )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(accent.stroke, lineWidth: 1)
+            )
+    }
+}
+
+private struct PanelActionButton: View {
+    enum Prominence {
+        case primary
+        case secondary
+        case quiet
+    }
+
+    let title: String
+    let systemImage: String
+    let prominence: Prominence
+    let theme: ThemePalette
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(foregroundColor)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(background)
+                .overlay(border)
+        }
+        .buttonStyle(.plain)
+        .opacity(prominence == .quiet ? 0.9 : 1)
+    }
+
+    private var foregroundColor: Color {
+        switch prominence {
+        case .primary:
+            return theme.strongText
+        case .secondary:
+            return theme.secondaryText
+        case .quiet:
+            return theme.tertiaryText
+        }
+    }
+
+    private var background: some View {
+        Capsule(style: .continuous)
+            .fill(backgroundColor)
+    }
+
+    private var border: some View {
+        Capsule(style: .continuous)
+            .strokeBorder(borderColor, lineWidth: 1)
+    }
+
+    private var backgroundColor: Color {
+        switch prominence {
+        case .primary:
+            return DashboardAccent.info.color.opacity(0.22)
+        case .secondary:
+            return theme.secondaryButtonFill
+        case .quiet:
+            return Color.clear
+        }
+    }
+
+    private var borderColor: Color {
+        switch prominence {
+        case .primary:
+            return DashboardAccent.info.stroke
+        case .secondary:
+            return theme.heavyStroke
+        case .quiet:
+            return theme.quietBorder
+        }
     }
 }

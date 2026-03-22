@@ -5,41 +5,55 @@ import Foundation
 final class AppModel: ObservableObject {
     private static let refreshIntervalDefaultsKey = "autoRefreshIntervalSeconds"
     private static let autoUpdateBehaviorDefaultsKey = "autoUpdateBehavior"
+    private static let appThemeStyleDefaultsKey = "appThemeStyle"
 
     @Published private(set) var snapshots: [ProviderVersionSnapshot]
     @Published private(set) var isRefreshing = false
     @Published private(set) var updatingProviders: Set<ProviderKind> = []
     @Published var autoUpdateBehavior: AutoUpdateBehavior {
         didSet {
-            UserDefaults.standard.set(autoUpdateBehavior.rawValue, forKey: Self.autoUpdateBehaviorDefaultsKey)
+            defaults.set(autoUpdateBehavior.rawValue, forKey: Self.autoUpdateBehaviorDefaultsKey)
         }
     }
     @Published var refreshInterval: RefreshInterval {
         didSet {
-            UserDefaults.standard.set(refreshInterval.rawValue, forKey: Self.refreshIntervalDefaultsKey)
+            defaults.set(refreshInterval.rawValue, forKey: Self.refreshIntervalDefaultsKey)
             rescheduleAutoRefresh()
+        }
+    }
+    @Published var themeStyle: AppThemeStyle {
+        didSet {
+            defaults.set(themeStyle.rawValue, forKey: Self.appThemeStyleDefaultsKey)
         }
     }
 
     private let service: VersionRefreshService
+    private let defaults: UserDefaults
     private var autoRefreshTask: Task<Void, Never>?
     private var visibleProviders: Set<ProviderKind>
 
-    init(service: VersionRefreshService = .live, autoload: Bool = true) {
-        let storedValue = UserDefaults.standard.integer(forKey: Self.refreshIntervalDefaultsKey)
-        let storedAutoUpdateBehavior = UserDefaults.standard.string(forKey: Self.autoUpdateBehaviorDefaultsKey)
+    var themePalette: ThemePalette {
+        AppTheme.palette(for: themeStyle)
+    }
+
+    init(service: VersionRefreshService = .live, defaults: UserDefaults = .standard, autoload: Bool = true) {
+        self.defaults = defaults
+        let storedValue = defaults.integer(forKey: Self.refreshIntervalDefaultsKey)
+        let storedAutoUpdateBehavior = defaults.string(forKey: Self.autoUpdateBehaviorDefaultsKey)
+        let storedThemeStyle = defaults.string(forKey: Self.appThemeStyleDefaultsKey)
         self.refreshInterval = RefreshInterval(rawValue: storedValue) ?? .fiveMinutes
         self.autoUpdateBehavior = AutoUpdateBehavior(rawValue: storedAutoUpdateBehavior ?? "") ?? .notifyOnly
+        self.themeStyle = AppThemeStyle(rawValue: storedThemeStyle ?? "") ?? .light
         self.service = service
         self.snapshots = ProviderKind.allCases.map(ProviderVersionSnapshot.placeholder(for:))
         self.visibleProviders = Set(
             ProviderKind.allCases.filter { provider in
                 let key = Self.visibilityDefaultsKey(for: provider)
-                if UserDefaults.standard.object(forKey: key) == nil {
+                if defaults.object(forKey: key) == nil {
                     return true
                 }
 
-                return UserDefaults.standard.bool(forKey: key)
+                return defaults.bool(forKey: key)
             }
         )
         rescheduleAutoRefresh()
@@ -120,7 +134,7 @@ final class AppModel: ObservableObject {
             visibleProviders.remove(provider)
         }
 
-        UserDefaults.standard.set(isVisible, forKey: Self.visibilityDefaultsKey(for: provider))
+        defaults.set(isVisible, forKey: Self.visibilityDefaultsKey(for: provider))
         objectWillChange.send()
     }
 

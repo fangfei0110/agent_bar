@@ -4,6 +4,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
     case openClaw
     case openCode
     case claudeCode
+    case codexCli
 
     var id: String { rawValue }
 
@@ -15,6 +16,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return "OpenCode"
         case .claudeCode:
             return "Claude Code"
+        case .codexCli:
+            return "Codex CLI"
         }
     }
 
@@ -26,6 +29,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return "opencode"
         case .claudeCode:
             return "claude"
+        case .codexCli:
+            return "codex"
         }
     }
 
@@ -37,6 +42,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return "opencode-ai"
         case .claudeCode:
             return "@anthropic-ai/claude-code"
+        case .codexCli:
+            return "@openai/codex"
         }
     }
 
@@ -48,6 +55,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return "opencode-ai/bin/opencode"
         case .claudeCode:
             return nil
+        case .codexCli:
+            return "@openai/codex/bin/codex.js"
         }
     }
 
@@ -59,6 +68,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return "anomalyco/tap/opencode"
         case .claudeCode:
             return "claude-code"
+        case .codexCli:
+            return nil
         }
     }
 
@@ -70,6 +81,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return [.npm, .homebrew]
         case .claudeCode:
             return [.npm, .homebrew]
+        case .codexCli:
+            return [.npm]
         }
     }
 
@@ -90,6 +103,10 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return [
                 "\(home)/.claude/settings.json",
                 "\(home)/.claude/.claude/settings.json"
+            ]
+        case .codexCli:
+            return [
+                "\(home)/.codex/config.toml"
             ]
         }
     }
@@ -115,7 +132,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    func nativeUpdateSubcommand() -> [String] {
+    func nativeUpdateSubcommand() -> [String]? {
         switch self {
         case .openClaw:
             return ["update"]
@@ -123,15 +140,32 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return ["upgrade"]
         case .claudeCode:
             return ["update"]
+        case .codexCli:
+            return nil
         }
     }
 
-    func updateMethodTitle(executablePath: String?) -> String {
-        guard let executablePath else {
-            return "Manual update"
+    func packageManagerUpdateCommand(for installSource: InstallSource, executablePath: String?) -> [String]? {
+        switch installSource {
+        case .homebrew:
+            guard let brewPackage else {
+                return nil
+            }
+            return ["brew", "upgrade", brewPackage]
+        case .npm:
+            if executablePath?.contains("/.npm/_npx/") == true {
+                return nil
+            }
+            return ["npm", "install", "-g", "\(npmPackage)@latest"]
+        case .pnpm:
+            return ["pnpm", "add", "-g", "\(npmPackage)@latest"]
+        case .nativeInstaller, .directBinary, .unknown:
+            return nil
         }
+    }
 
-        return ([executablePath] + nativeUpdateSubcommand()).joined(separator: " ")
+    func updateMethodTitle(command: [String]?) -> String {
+        command?.joined(separator: " ") ?? "Manual update"
     }
 }
 

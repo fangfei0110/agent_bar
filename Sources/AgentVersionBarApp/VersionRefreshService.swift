@@ -49,6 +49,11 @@ struct VersionRefreshService: Sendable {
             : (current: nil, latest: nil)
         let current = statusVersions.current ?? currentVersion(for: provider, executablePath: executablePath)
         let latest = statusVersions.latest ?? latestVersion(for: provider, installSource: installSource)
+        let updateCommand = terminalUpdateCommand(
+            for: provider,
+            executablePath: executablePath,
+            installSource: installSource
+        )
         let error: String?
         if executablePath == nil {
             error = "CLI not found on PATH or common install locations"
@@ -67,8 +72,8 @@ struct VersionRefreshService: Sendable {
             configPath: configPath,
             installSource: installSource,
             installMethodTitle: provider.installMethodTitle(for: installSource, executablePath: executablePath),
-            updateMethodTitle: provider.updateMethodTitle(executablePath: executablePath),
-            terminalUpdateCommand: terminalUpdateCommand(for: provider, executablePath: executablePath),
+            updateMethodTitle: provider.updateMethodTitle(command: updateCommand),
+            terminalUpdateCommand: updateCommand,
             isInstalled: executablePath != nil,
             checkedAt: dateProvider(),
             errorDescription: error
@@ -221,12 +226,19 @@ struct VersionRefreshService: Sendable {
         return candidates.first ?? "Unavailable"
     }
 
-    private func terminalUpdateCommand(for provider: ProviderKind, executablePath: String?) -> [String]? {
-        guard let executablePath else {
-            return nil
+    private func terminalUpdateCommand(
+        for provider: ProviderKind,
+        executablePath: String?,
+        installSource: InstallSource
+    ) -> [String]? {
+        if let executablePath, let nativeUpdateSubcommand = provider.nativeUpdateSubcommand() {
+            return [executablePath] + nativeUpdateSubcommand
         }
 
-        return [executablePath] + provider.nativeUpdateSubcommand()
+        return provider.packageManagerUpdateCommand(
+            for: installSource,
+            executablePath: executablePath
+        )
     }
 
     private func runTextCommand(_ command: [String]) -> String? {

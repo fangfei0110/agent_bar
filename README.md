@@ -5,6 +5,7 @@ Lightweight macOS menu bar app for tracking installed and latest versions of:
 - OpenClaw
 - OpenCode
 - Claude Code
+- Codex CLI
 
 ## What It Shows
 
@@ -25,6 +26,9 @@ Lightweight macOS menu bar app for tracking installed and latest versions of:
   - Current: `claude --version`
   - Latest: `npm view @anthropic-ai/claude-code version`
   - Homebrew: `brew info --json=v2 claude-code`
+- `Codex CLI`
+  - Current: `codex --version`
+  - Latest: `npm view @openai/codex version`
 
 ## Run
 
