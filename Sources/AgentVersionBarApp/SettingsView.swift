@@ -128,7 +128,7 @@ struct SettingsView: View {
 
                 settingsCard("Workspace") {
                     VStack(alignment: .leading, spacing: 8) {
-                        settingsRow("Project path", "/Users/fei/projects/agent_version_bar")
+                        settingsRow("Project path", model.workspacePath)
                         settingsRow("Menu title", "Agent Bar")
                     }
                 }

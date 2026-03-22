@@ -9,6 +9,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var snapshots: [ProviderVersionSnapshot]
     @Published private(set) var isRefreshing = false
     @Published private(set) var updatingProviders: Set<ProviderKind> = []
+    let workspacePath: String
     @Published var autoUpdateBehavior: AutoUpdateBehavior {
         didSet {
             UserDefaults.standard.set(autoUpdateBehavior.rawValue, forKey: Self.autoUpdateBehaviorDefaultsKey)
@@ -25,12 +26,17 @@ final class AppModel: ObservableObject {
     private var autoRefreshTask: Task<Void, Never>?
     private var visibleProviders: Set<ProviderKind>
 
-    init(service: VersionRefreshService = .live, autoload: Bool = true) {
+    init(
+        service: VersionRefreshService = .live,
+        autoload: Bool = true,
+        workspacePath: String? = nil
+    ) {
         let storedValue = UserDefaults.standard.integer(forKey: Self.refreshIntervalDefaultsKey)
         let storedAutoUpdateBehavior = UserDefaults.standard.string(forKey: Self.autoUpdateBehaviorDefaultsKey)
         self.refreshInterval = RefreshInterval(rawValue: storedValue) ?? .fiveMinutes
         self.autoUpdateBehavior = AutoUpdateBehavior(rawValue: storedAutoUpdateBehavior ?? "") ?? .notifyOnly
         self.service = service
+        self.workspacePath = workspacePath ?? Self.resolveWorkspacePath()
         self.snapshots = ProviderKind.allCases.map(ProviderVersionSnapshot.placeholder(for:))
         self.visibleProviders = Set(
             ProviderKind.allCases.filter { provider in
@@ -146,5 +152,63 @@ final class AppModel: ObservableObject {
 
     private static func visibilityDefaultsKey(for provider: ProviderKind) -> String {
         "is\(provider.rawValue)Visible"
+    }
+
+    nonisolated static func resolveWorkspacePath(
+        executablePath: String? = Bundle.main.executableURL?.path,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        currentDirectoryPath: String = FileManager.default.currentDirectoryPath,
+        fileManager: FileManager = .default
+    ) -> String {
+        let candidates = [
+            executablePath.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path },
+            environment["PWD"],
+            currentDirectoryPath
+        ].compactMap(Self.normalizedPath)
+
+        for candidate in candidates {
+            if let workspaceRoot = findWorkspaceRoot(startingAt: candidate, fileManager: fileManager) {
+                return workspaceRoot
+            }
+        }
+
+        return candidates.first ?? currentDirectoryPath
+    }
+
+    private nonisolated static func normalizedPath(_ path: String?) -> String? {
+        guard let path, path.isEmpty == false else {
+            return nil
+        }
+
+        return URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    private nonisolated static func findWorkspaceRoot(startingAt path: String, fileManager: FileManager) -> String? {
+        var currentURL = URL(fileURLWithPath: path).standardizedFileURL
+        var isDirectory: ObjCBool = false
+
+        if fileManager.fileExists(atPath: currentURL.path, isDirectory: &isDirectory), isDirectory.boolValue == false {
+            currentURL.deleteLastPathComponent()
+        }
+
+        while true {
+            if workspaceMarkerExists(in: currentURL, fileManager: fileManager) {
+                return currentURL.path
+            }
+
+            let parentURL = currentURL.deletingLastPathComponent()
+            if parentURL.path == currentURL.path {
+                return nil
+            }
+
+            currentURL = parentURL
+        }
+    }
+
+    private nonisolated static func workspaceMarkerExists(in directoryURL: URL, fileManager: FileManager) -> Bool {
+        let markers = ["Package.swift", ".git"]
+        return markers.contains { marker in
+            fileManager.fileExists(atPath: directoryURL.appendingPathComponent(marker).path)
+        }
     }
 }
