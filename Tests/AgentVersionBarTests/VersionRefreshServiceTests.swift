@@ -94,6 +94,53 @@ struct VersionRefreshServiceTests {
     }
 
     @Test
+    func resolveWorkspacePathFindsRepoRootFromExecutablePath() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let executableDirectoryURL = rootURL
+            .appendingPathComponent(".run/AgentVersionBar.app/Contents/MacOS", isDirectory: true)
+
+        try fileManager.createDirectory(at: executableDirectoryURL, withIntermediateDirectories: true)
+        try Data().write(to: rootURL.appendingPathComponent("Package.swift"))
+
+        defer {
+            try? fileManager.removeItem(at: rootURL)
+        }
+
+        let workspacePath = AppModel.resolveWorkspacePath(
+            executablePath: executableDirectoryURL.appendingPathComponent("AgentVersionBarApp").path,
+            environment: ["PWD": "/tmp/not-the-workspace"],
+            currentDirectoryPath: "/tmp/not-the-workspace",
+            fileManager: fileManager
+        )
+
+        #expect(workspacePath == rootURL.path)
+    }
+
+    @Test
+    func resolveWorkspacePathFallsBackToCurrentDirectory() throws {
+        let fileManager = FileManager.default
+        let currentDirectoryURL = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        try fileManager.createDirectory(at: currentDirectoryURL, withIntermediateDirectories: true)
+
+        defer {
+            try? fileManager.removeItem(at: currentDirectoryURL)
+        }
+
+        let workspacePath = AppModel.resolveWorkspacePath(
+            executablePath: nil,
+            environment: [:],
+            currentDirectoryPath: currentDirectoryURL.path,
+            fileManager: fileManager
+        )
+
+        #expect(workspacePath == currentDirectoryURL.path)
+    }
+
+    @Test
     func refreshUsesPackageManagerUpdateCommandForCodexCLI() {
         let service = VersionRefreshService(
             commandRunner: { command in
