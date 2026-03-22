@@ -168,7 +168,7 @@ struct SettingsView: View {
                     title: "About",
                     subtitle: "A focused menu bar utility for checking installed and available versions across local coding agents.",
                     metrics: [
-                        ("Version", "0.2.0"),
+                        ("Version", "0.2.1"),
                         ("Agents", "\(ProviderKind.allCases.count)"),
                         ("Theme", model.themeStyle.displayTitle)
                     ]
@@ -177,7 +177,7 @@ struct SettingsView: View {
                 settingsCard("Application", systemImage: "sparkles.rectangle.stack") {
                     VStack(alignment: .leading, spacing: 10) {
                         settingsRow("Name", "Agent Bar")
-                        settingsRow("Version", "0.2.0")
+                        settingsRow("Version", "0.2.1")
                         settingsRow("Tracked agents", "\(ProviderKind.allCases.count)")
                     }
                 }
