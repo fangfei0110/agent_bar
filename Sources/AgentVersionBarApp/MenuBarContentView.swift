@@ -204,8 +204,20 @@ private struct ProviderCard: View {
             }
 
             HStack(spacing: 10) {
-                MetricBlock(title: "Installed", value: snapshot.currentTitle, theme: theme)
-                MetricBlock(title: "Available", value: snapshot.latestTitle, theme: theme)
+                MetricBlock(
+                    title: "Installed",
+                    value: snapshot.currentTitle,
+                    role: .current,
+                    status: snapshot.status,
+                    theme: theme
+                )
+                MetricBlock(
+                    title: "Available",
+                    value: snapshot.latestTitle,
+                    role: .available,
+                    status: snapshot.status,
+                    theme: theme
+                )
             }
 
             HStack(spacing: 10) {
@@ -247,8 +259,15 @@ private struct ProviderCard: View {
 }
 
 private struct MetricBlock: View {
+    enum Role {
+        case current
+        case available
+    }
+
     let title: String
     let value: String
+    let role: Role
+    let status: VersionStatus
     let theme: ThemePalette
 
     var body: some View {
@@ -259,11 +278,23 @@ private struct MetricBlock: View {
                 .foregroundStyle(theme.tertiaryText)
 
             Text(value)
-                .font(.system(.caption, design: .monospaced).weight(.medium))
-                .foregroundStyle(theme.strongText)
+                .font(.system(size: 12.5, weight: valueWeight, design: .monospaced))
+                .foregroundStyle(valueColor)
                 .lineLimit(1)
         }
         .dashboardMetricTile(theme: theme)
+    }
+
+    private var valueWeight: Font.Weight {
+        .bold
+    }
+
+    private var valueColor: Color {
+        if role == .available, status == .updateAvailable {
+            return theme.updateHighlight
+        }
+
+        return theme.strongText
     }
 }
 

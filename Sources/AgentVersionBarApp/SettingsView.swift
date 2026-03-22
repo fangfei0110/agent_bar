@@ -168,7 +168,7 @@ struct SettingsView: View {
                     title: "About",
                     subtitle: "A focused menu bar utility for checking installed and available versions across local coding agents.",
                     metrics: [
-                        ("Version", "0.1.0"),
+                        ("Version", "0.2.0"),
                         ("Agents", "\(ProviderKind.allCases.count)"),
                         ("Theme", model.themeStyle.displayTitle)
                     ]
@@ -177,7 +177,7 @@ struct SettingsView: View {
                 settingsCard("Application", systemImage: "sparkles.rectangle.stack") {
                     VStack(alignment: .leading, spacing: 10) {
                         settingsRow("Name", "Agent Bar")
-                        settingsRow("Version", "0.1.0")
+                        settingsRow("Version", "0.2.0")
                         settingsRow("Tracked agents", "\(ProviderKind.allCases.count)")
                     }
                 }
@@ -252,8 +252,8 @@ struct SettingsView: View {
             }
 
             HStack(spacing: 10) {
-                versionBadge(title: "Current", value: snapshot.currentTitle)
-                versionBadge(title: "Latest", value: snapshot.latestTitle)
+                versionBadge(title: "Current", value: snapshot.currentTitle, role: .current, status: snapshot.status)
+                versionBadge(title: "Latest", value: snapshot.latestTitle, role: .available, status: snapshot.status)
             }
 
             pathBlock(
@@ -362,7 +362,7 @@ struct SettingsView: View {
         .dashboardMetricTile(theme: theme)
     }
 
-    private func versionBadge(title: String, value: String) -> some View {
+    private func versionBadge(title: String, value: String, role: VersionBadgeRole, status: VersionStatus) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title.uppercased())
                 .font(.system(size: 10, weight: .bold, design: .rounded))
@@ -370,8 +370,8 @@ struct SettingsView: View {
                 .foregroundStyle(theme.tertiaryText)
 
             Text(value)
-                .font(.system(.caption, design: .monospaced).weight(.medium))
-                .foregroundStyle(theme.strongText)
+                .font(.system(size: 12.5, weight: .bold, design: .monospaced))
+                .foregroundStyle(role == .available && status == .updateAvailable ? theme.updateHighlight : theme.strongText)
                 .lineLimit(1)
         }
         .dashboardMetricTile(theme: theme)
@@ -442,6 +442,11 @@ private struct SettingsStatusBadge: View {
                     .strokeBorder(status.dashboardAccent.stroke, lineWidth: 1)
             )
     }
+}
+
+private enum VersionBadgeRole {
+    case current
+    case available
 }
 
 private enum SettingsTab {

@@ -71,6 +71,7 @@ struct ThemePalette: Equatable {
     let codeBlockFillToken: ThemeColorToken
     let codeBlockStrokeToken: ThemeColorToken
     let rowDividerToken: ThemeColorToken
+    let updateHighlightToken: ThemeColorToken
 
     var panelBackgroundTop: Color { panelBackgroundTopToken.color }
     var panelBackgroundBottom: Color { panelBackgroundBottomToken.color }
@@ -91,6 +92,7 @@ struct ThemePalette: Equatable {
     var codeBlockFill: Color { codeBlockFillToken.color }
     var codeBlockStroke: Color { codeBlockStrokeToken.color }
     var rowDivider: Color { rowDividerToken.color }
+    var updateHighlight: Color { updateHighlightToken.color }
 }
 
 enum DashboardAccent: Equatable {
@@ -139,7 +141,8 @@ enum AppTheme {
                 quietBorderToken: ThemeColorToken(red: 0.71, green: 0.63, blue: 0.54, opacity: 0.16),
                 codeBlockFillToken: ThemeColorToken(red: 0.96, green: 0.93, blue: 0.89, opacity: 0.98),
                 codeBlockStrokeToken: ThemeColorToken(red: 0.69, green: 0.61, blue: 0.50, opacity: 0.14),
-                rowDividerToken: ThemeColorToken(red: 0.71, green: 0.63, blue: 0.54, opacity: 0.12)
+                rowDividerToken: ThemeColorToken(red: 0.71, green: 0.63, blue: 0.54, opacity: 0.12),
+                updateHighlightToken: ThemeColorToken(red: 0.78, green: 0.27, blue: 0.23, opacity: 0.96)
             )
         case .light:
             return ThemePalette(
@@ -160,7 +163,8 @@ enum AppTheme {
                 quietBorderToken: ThemeColorToken(red: 0.62, green: 0.69, blue: 0.80, opacity: 0.14),
                 codeBlockFillToken: ThemeColorToken(red: 0.94, green: 0.97, blue: 1.00, opacity: 0.98),
                 codeBlockStrokeToken: ThemeColorToken(red: 0.60, green: 0.68, blue: 0.80, opacity: 0.12),
-                rowDividerToken: ThemeColorToken(red: 0.62, green: 0.69, blue: 0.80, opacity: 0.10)
+                rowDividerToken: ThemeColorToken(red: 0.62, green: 0.69, blue: 0.80, opacity: 0.10),
+                updateHighlightToken: ThemeColorToken(red: 0.79, green: 0.22, blue: 0.22, opacity: 0.96)
             )
         case .dark:
             return ThemePalette(
@@ -181,7 +185,8 @@ enum AppTheme {
                 quietBorderToken: ThemeColorToken(red: 0.85, green: 0.88, blue: 0.93, opacity: 0.10),
                 codeBlockFillToken: ThemeColorToken(red: 0.07, green: 0.09, blue: 0.12, opacity: 0.98),
                 codeBlockStrokeToken: ThemeColorToken(red: 0.85, green: 0.88, blue: 0.93, opacity: 0.10),
-                rowDividerToken: ThemeColorToken(red: 0.85, green: 0.88, blue: 0.93, opacity: 0.08)
+                rowDividerToken: ThemeColorToken(red: 0.85, green: 0.88, blue: 0.93, opacity: 0.08),
+                updateHighlightToken: ThemeColorToken(red: 0.97, green: 0.47, blue: 0.43, opacity: 0.96)
             )
         }
     }

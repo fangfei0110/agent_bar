@@ -1,6 +1,7 @@
 .DS_Store
 /.build
 /.run
+/AgentVersionBarPreview.app
 /Packages
 xcuserdata/
 DerivedData/
