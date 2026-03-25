@@ -146,4 +146,59 @@ struct ChangelogWindowModelTests {
 
         #expect(model.state == ChangelogViewState.idle)
     }
+
+    @Test
+    @MainActor
+    func openingSnapshotWithoutUpdateClearsPreviousLoadedState() async {
+        let updateSnapshot = ProviderVersionSnapshot(
+            provider: .codexCli,
+            currentVersion: "0.116.0",
+            latestVersion: "0.117.0",
+            executablePath: "/usr/local/bin/codex",
+            resolvedExecutablePath: "/usr/local/bin/codex",
+            configPath: "\(NSHomeDirectory())/.codex/config.toml",
+            installSource: .npm,
+            installMethodTitle: "npm global package (@openai/codex)",
+            updateMethodTitle: "npm install -g @openai/codex@latest",
+            terminalUpdateCommand: ["npm", "install", "-g", "@openai/codex@latest"],
+            isInstalled: true,
+            checkedAt: Date(timeIntervalSince1970: 300),
+            errorDescription: nil
+        )
+        let upToDateSnapshot = ProviderVersionSnapshot(
+            provider: .codexCli,
+            currentVersion: "0.117.0",
+            latestVersion: "0.117.0",
+            executablePath: "/usr/local/bin/codex",
+            resolvedExecutablePath: "/usr/local/bin/codex",
+            configPath: "\(NSHomeDirectory())/.codex/config.toml",
+            installSource: .npm,
+            installMethodTitle: "npm global package (@openai/codex)",
+            updateMethodTitle: "npm install -g @openai/codex@latest",
+            terminalUpdateCommand: ["npm", "install", "-g", "@openai/codex@latest"],
+            isInstalled: true,
+            checkedAt: Date(timeIntervalSince1970: 300),
+            errorDescription: nil
+        )
+
+        let model = ChangelogWindowModel(
+            service: ChangelogService(
+                load: { request in
+                    ChangelogContent(
+                        request: request,
+                        summary: "中文总结",
+                        originalContent: "## 0.117.0",
+                        summaryErrorDescription: nil
+                    )
+                }
+            )
+        )
+
+        model.open(snapshot: updateSnapshot)
+        await model.waitForLoadForTesting()
+        model.open(snapshot: upToDateSnapshot)
+        await model.waitForLoadForTesting()
+
+        #expect(model.state == ChangelogViewState.idle)
+    }
 }

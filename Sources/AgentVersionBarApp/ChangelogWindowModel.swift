@@ -17,6 +17,8 @@ final class ChangelogWindowModel: ObservableObject {
 
     func open(snapshot: ProviderVersionSnapshot) {
         guard let request = ChangelogRequest(snapshot: snapshot) else {
+            loadTask?.cancel()
+            state = .idle
             return
         }
 

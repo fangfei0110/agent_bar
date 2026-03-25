@@ -58,16 +58,49 @@ struct ChangelogService: Sendable {
             try LiveChangelogLoader().load(request: request)
         }.value
     }
+
+    static func latestVersionSections(from markdown: String, limit: Int = 2) -> String {
+        let trimmed = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else {
+            return markdown
+        }
+
+        let lines = trimmed.components(separatedBy: .newlines)
+        let headingPattern = #"^\[v?\d+(?:\.\d+)+(?:[-+][A-Za-z0-9._-]+)?\]\("#
+        var sectionStartIndexes: [Int] = []
+
+        for (index, line) in lines.enumerated() {
+            if line.range(of: headingPattern, options: .regularExpression) != nil {
+                sectionStartIndexes.append(index)
+            }
+        }
+
+        guard sectionStartIndexes.isEmpty == false else {
+            return markdown
+        }
+
+        let limitedStarts = Array(sectionStartIndexes.prefix(limit))
+        let endIndex = limitedStarts.count < sectionStartIndexes.count
+            ? sectionStartIndexes[limitedStarts.count]
+            : lines.count
+
+        return lines[..<endIndex].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func summaryPrompt(for request: ChangelogRequest) -> String {
+        """
+        请使用中文，总结 \(request.provider.displayName) 从已安装版本 \(request.currentVersion) 到可用版本 \(request.latestVersion) 的关键变化。只基于输入内容里的最近 2 个版本进行总结。重点提炼：用户可感知的新功能、重要修复、破坏性变更、迁移注意事项、升级风险。输出尽量简洁，适合开发者快速判断是否升级。
+        """
+    }
 }
 
 private struct LiveChangelogLoader {
-    private let commandRunner: ([String]) -> CommandOutput = VersionRefreshService.runCommand
-
     func load(request: ChangelogRequest) throws -> ChangelogContent {
         let originalContent = try extractOriginalContent(for: request)
+        let summaryInput = ChangelogService.latestVersionSections(from: originalContent, limit: 2)
 
         do {
-            let summary = try summarize(request: request)
+            let summary = try summarize(request: request, sourceContent: summaryInput)
             return ChangelogContent(
                 request: request,
                 summary: summary,
@@ -85,7 +118,8 @@ private struct LiveChangelogLoader {
     }
 
     private func extractOriginalContent(for request: ChangelogRequest) throws -> String {
-        let output = commandRunner([
+        let output = try runCommand(
+            [
             "/usr/bin/env",
             "summarize",
             request.sourceURL.absoluteString,
@@ -94,8 +128,12 @@ private struct LiveChangelogLoader {
             "--markdown-mode", "readability",
             "--plain",
             "--no-color",
-            "--max-extract-characters", "40000"
-        ])
+            "--stream", "off",
+            "--metrics", "off",
+            "--timeout", "30s",
+            "--max-extract-characters", "12000"
+            ]
+        )
 
         let text = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         guard output.exitCode == 0, text.isEmpty == false else {
@@ -105,16 +143,22 @@ private struct LiveChangelogLoader {
         return text
     }
 
-    private func summarize(request: ChangelogRequest) throws -> String {
-        let output = commandRunner([
+    private func summarize(request: ChangelogRequest, sourceContent: String) throws -> String {
+        let output = try runCommand(
+            [
             "/usr/bin/env",
             "summarize",
-            request.sourceURL.absoluteString,
+            "-",
             "--plain",
             "--no-color",
+            "--stream", "off",
+            "--metrics", "off",
             "--length", "medium",
-            "--prompt", summaryPrompt(for: request)
-        ])
+            "--timeout", "30s",
+            "--prompt", ChangelogService.summaryPrompt(for: request)
+            ],
+            stdin: sourceContent
+        )
 
         let text = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         guard output.exitCode == 0, text.isEmpty == false else {
@@ -122,12 +166,6 @@ private struct LiveChangelogLoader {
         }
 
         return text
-    }
-
-    private func summaryPrompt(for request: ChangelogRequest) -> String {
-        """
-        Summarize the most important changes for \(request.provider.displayName) between installed version \(request.currentVersion) and available version \(request.latestVersion). Focus on user-impacting features, fixes, breaking changes, migration notes, and update risk. Keep it concise and structured for a coding tool user.
-        """
     }
 
     private func errorMessage(from output: CommandOutput) -> String {
@@ -149,17 +187,93 @@ private struct LiveChangelogLoader {
 
         return error.localizedDescription
     }
+
+    private func runCommand(_ command: [String], stdin: String? = nil) throws -> CommandOutput {
+        guard let executable = command.first else {
+            throw ChangelogServiceError.executionFailed("Missing executable")
+        }
+
+        let process = Process()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        let stdinPipe = Pipe()
+
+        if executable.hasPrefix("/") {
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = Array(command.dropFirst())
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = command
+        }
+
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        process.standardInput = stdinPipe
+
+        let group = DispatchGroup()
+        var stdoutData = Data()
+        var stderrData = Data()
+
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+
+        do {
+            try process.run()
+        } catch {
+            stdinPipe.fileHandleForWriting.closeFile()
+            throw ChangelogServiceError.executionFailed(error.localizedDescription)
+        }
+
+        if let stdin {
+            if let data = stdin.data(using: .utf8) {
+                stdinPipe.fileHandleForWriting.write(data)
+            }
+        }
+        stdinPipe.fileHandleForWriting.closeFile()
+
+        let timeoutDate = Date().addingTimeInterval(35)
+        while process.isRunning && Date() < timeoutDate {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+
+        if process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+            group.wait()
+            throw ChangelogServiceError.executionFailed("summarize command timed out")
+        }
+
+        group.wait()
+
+        return CommandOutput(
+            exitCode: process.terminationStatus,
+            stdout: String(decoding: stdoutData, as: UTF8.self),
+            stderr: String(decoding: stderrData, as: UTF8.self)
+        )
+    }
 }
 
 private enum ChangelogServiceError: LocalizedError {
     case extractionFailed(String)
     case summaryFailed(String)
+    case executionFailed(String)
 
     var errorDescription: String? {
         switch self {
         case let .extractionFailed(message):
             return message
         case let .summaryFailed(message):
+            return message
+        case let .executionFailed(message):
             return message
         }
     }
