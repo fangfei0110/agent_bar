@@ -73,6 +73,19 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    var officialChangelogURL: URL? {
+        switch self {
+        case .openClaw:
+            return URL(string: "https://github.com/clawdbot/clawdbot/releases")
+        case .openCode:
+            return URL(string: "https://opencode.ai/changelog")
+        case .claudeCode:
+            return URL(string: "https://github.com/anthropics/claude-code/releases")
+        case .codexCli:
+            return URL(string: "https://github.com/openai/codex/releases")
+        }
+    }
+
     var fallbackLatestSources: [InstallSource] {
         switch self {
         case .openClaw:
@@ -258,6 +271,18 @@ struct ProviderVersionSnapshot: Identifiable, Equatable, Sendable {
 
     var errorTitle: String {
         errorDescription ?? status.displayTitle
+    }
+
+    var changelogURL: URL? {
+        guard status == .updateAvailable else {
+            return nil
+        }
+
+        return provider.officialChangelogURL
+    }
+
+    var isChangelogAvailable: Bool {
+        changelogURL != nil
     }
 
     static func placeholder(for provider: ProviderKind) -> ProviderVersionSnapshot {

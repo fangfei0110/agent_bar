@@ -176,4 +176,52 @@ struct VersionRefreshServiceTests {
         #expect(snapshot.configPath == "\(NSHomeDirectory())/.codex/config.toml")
         #expect(snapshot.checkedAt == Date(timeIntervalSince1970: 200))
     }
+
+    @Test
+    func providersExposeOfficialChangelogURLs() {
+        #expect(ProviderKind.openClaw.officialChangelogURL?.absoluteString == "https://github.com/clawdbot/clawdbot/releases")
+        #expect(ProviderKind.openCode.officialChangelogURL?.absoluteString == "https://opencode.ai/changelog")
+        #expect(ProviderKind.claudeCode.officialChangelogURL?.absoluteString == "https://github.com/anthropics/claude-code/releases")
+        #expect(ProviderKind.codexCli.officialChangelogURL?.absoluteString == "https://github.com/openai/codex/releases")
+    }
+
+    @Test
+    func snapshotOnlyOffersChangelogWhenAnUpdateIsAvailable() {
+        let updateSnapshot = ProviderVersionSnapshot(
+            provider: .codexCli,
+            currentVersion: "0.116.0",
+            latestVersion: "0.117.0",
+            executablePath: "/usr/local/bin/codex",
+            resolvedExecutablePath: "/usr/local/bin/codex",
+            configPath: "\(NSHomeDirectory())/.codex/config.toml",
+            installSource: .npm,
+            installMethodTitle: "npm global package (@openai/codex)",
+            updateMethodTitle: "npm install -g @openai/codex@latest",
+            terminalUpdateCommand: ["npm", "install", "-g", "@openai/codex@latest"],
+            isInstalled: true,
+            checkedAt: Date(timeIntervalSince1970: 300),
+            errorDescription: nil
+        )
+
+        let currentSnapshot = ProviderVersionSnapshot(
+            provider: .codexCli,
+            currentVersion: "0.117.0",
+            latestVersion: "0.117.0",
+            executablePath: "/usr/local/bin/codex",
+            resolvedExecutablePath: "/usr/local/bin/codex",
+            configPath: "\(NSHomeDirectory())/.codex/config.toml",
+            installSource: .npm,
+            installMethodTitle: "npm global package (@openai/codex)",
+            updateMethodTitle: "npm install -g @openai/codex@latest",
+            terminalUpdateCommand: ["npm", "install", "-g", "@openai/codex@latest"],
+            isInstalled: true,
+            checkedAt: Date(timeIntervalSince1970: 300),
+            errorDescription: nil
+        )
+
+        #expect(updateSnapshot.isChangelogAvailable == true)
+        #expect(updateSnapshot.changelogURL == ProviderKind.codexCli.officialChangelogURL)
+        #expect(currentSnapshot.isChangelogAvailable == false)
+        #expect(currentSnapshot.changelogURL == nil)
+    }
 }

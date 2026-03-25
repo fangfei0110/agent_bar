@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MenuBarContentView: View {
     @ObservedObject var model: AppModel
+    @ObservedObject var changelogModel: ChangelogWindowModel
     @Environment(\.openWindow) private var openWindow
 
     private var theme: ThemePalette { model.themePalette }
@@ -16,7 +17,12 @@ struct MenuBarContentView: View {
             } else {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(model.visibleSnapshots) { snapshot in
-                        ProviderCard(snapshot: snapshot, model: model, theme: theme)
+                        ProviderCard(
+                            snapshot: snapshot,
+                            model: model,
+                            theme: theme,
+                            openChangelog: openChangelog
+                        )
                     }
                 }
             }
@@ -130,6 +136,12 @@ struct MenuBarContentView: View {
         }
         .dashboardCard(theme: theme, padding: 10)
     }
+
+    private func openChangelog(for snapshot: ProviderVersionSnapshot) {
+        changelogModel.open(snapshot: snapshot)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        openWindow(id: ChangelogView.windowID)
+    }
 }
 
 private struct ThemeMenuButton: View {
@@ -169,6 +181,7 @@ private struct ProviderCard: View {
     let snapshot: ProviderVersionSnapshot
     @ObservedObject var model: AppModel
     let theme: ThemePalette
+    let openChangelog: (ProviderVersionSnapshot) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -223,6 +236,17 @@ private struct ProviderCard: View {
             }
 
             HStack(spacing: 10) {
+                if snapshot.isChangelogAvailable {
+                    PanelActionButton(
+                        title: "Changelog",
+                        systemImage: "doc.text.magnifyingglass",
+                        prominence: .secondary,
+                        theme: theme
+                    ) {
+                        openChangelog(snapshot)
+                    }
+                }
+
                 PanelActionButton(
                     title: model.isUpdating(snapshot.provider) ? "Updating..." : "Update",
                     systemImage: "arrow.up.circle",

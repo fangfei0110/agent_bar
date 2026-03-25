@@ -5,10 +5,11 @@ import SwiftUI
 struct AgentVersionBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
+    @StateObject private var changelogModel = ChangelogWindowModel()
 
     var body: some Scene {
         MenuBarExtra("Agent Versions", systemImage: "square.stack.3d.up.fill") {
-            MenuBarContentView(model: model)
+            MenuBarContentView(model: model, changelogModel: changelogModel)
         }
         .menuBarExtraStyle(.window)
 
@@ -16,6 +17,11 @@ struct AgentVersionBarApp: App {
             SettingsView(model: model)
         }
         .defaultSize(width: 500, height: 540)
+
+        WindowGroup("Changelog", id: ChangelogView.windowID) {
+            ChangelogView(appModel: model, model: changelogModel)
+        }
+        .defaultSize(width: 760, height: 640)
     }
 }
 
