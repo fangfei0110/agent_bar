@@ -25,12 +25,16 @@ struct ChangelogView: View {
                     switch model.state {
                     case .idle:
                         idleState
-                    case let .loading(request):
-                        loadingState(request: request)
+                    case let .loading(request, phase):
+                        loadingState(request: request, phase: phase)
+                    case let .showingOriginal(content):
+                        partialLoadedState(content: content)
                     case let .loaded(content):
                         loadedState(content: content)
-                    case let .failed(request, message):
-                        failedState(request: request, message: message)
+                    case let .unavailable(provider):
+                        unavailableState(provider: provider)
+                    case let .failed(provider, message):
+                        failedState(provider: provider, message: message)
                     }
                 }
                 .padding(20)
@@ -54,12 +58,34 @@ struct ChangelogView: View {
                     .foregroundStyle(theme.secondaryText)
             }
             .dashboardCard(theme: theme, padding: 18)
-        case let .loading(request):
+        case let .loading(request, _):
             requestHero(for: request)
+        case let .showingOriginal(content):
+            requestHero(for: content.request)
         case let .loaded(content):
             requestHero(for: content.request)
-        case let .failed(request, _):
-            requestHero(for: request)
+        case let .unavailable(provider):
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(provider.displayName) Changelog")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(theme.strongText)
+
+                Text("Version information is unavailable for this agent.")
+                    .font(.subheadline)
+                    .foregroundStyle(theme.secondaryText)
+            }
+            .dashboardCard(theme: theme, padding: 18)
+        case let .failed(provider, _):
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(provider.displayName) Changelog")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(theme.strongText)
+
+                Text("Unable to load changelog content.")
+                    .font(.subheadline)
+                    .foregroundStyle(theme.secondaryText)
+            }
+            .dashboardCard(theme: theme, padding: 18)
         }
     }
 
@@ -109,17 +135,49 @@ struct ChangelogView: View {
         .dashboardCard(theme: theme, padding: 18)
     }
 
-    private func loadingState(request: ChangelogRequest) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Loading official changelog content", systemImage: "arrow.triangle.2.circlepath.circle.fill")
+    private func unavailableState(provider: ProviderKind) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Changelog unavailable")
                 .font(.headline)
                 .foregroundStyle(theme.strongText)
 
-            Text("Fetching and summarizing \(request.provider.displayName) release notes.")
+            Text("\(provider.displayName) does not currently expose enough version information to load its changelog.")
                 .font(.subheadline)
                 .foregroundStyle(theme.secondaryText)
         }
+        .dashboardCard(theme: theme, padding: 18)
+    }
+
+    private func loadingState(request: ChangelogRequest, phase: ChangelogLoadingPhase) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .controlSize(.regular)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(phase.title)
+                        .font(.headline)
+                        .foregroundStyle(theme.strongText)
+
+                    Text(phase.subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(theme.secondaryText)
+                }
+            }
+
+            Text("Source: \(request.provider.displayName) • \(request.currentVersion) -> \(request.latestVersion)")
+                .font(.caption)
+                .foregroundStyle(theme.tertiaryText)
+        }
         .dashboardCard(theme: theme, accent: .info, padding: 18)
+    }
+
+    private func partialLoadedState(content: ChangelogContent) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            summaryLoadingCard()
+            originalCard(content: content)
+        }
     }
 
     private func loadedState(content: ChangelogContent) -> some View {
@@ -129,7 +187,7 @@ struct ChangelogView: View {
         }
     }
 
-    private func failedState(request: ChangelogRequest, message: String) -> some View {
+    private func failedState(provider: ProviderKind, message: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Unable to load changelog content", systemImage: "exclamationmark.triangle.fill")
                 .font(.headline)
@@ -138,12 +196,43 @@ struct ChangelogView: View {
             Text(message)
                 .font(.subheadline)
                 .foregroundStyle(theme.secondaryText)
-
-            miniActionButton("Open in Browser", systemImage: "safari") {
-                NSWorkspace.shared.open(request.sourceURL)
-            }
         }
         .dashboardCard(theme: theme, accent: .warning, padding: 18)
+    }
+
+    private func summaryLoadingCard() -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Summary", systemImage: "sparkles")
+                .font(.headline)
+                .foregroundStyle(theme.strongText)
+
+            HStack(spacing: 10) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .controlSize(.regular)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Summarizing latest two versions")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(theme.strongText)
+
+                    Text("Summary will appear here as soon as it finishes.")
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryText)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(theme.metricTileFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(theme.metricTileStroke, lineWidth: 1)
+            )
+        }
+        .dashboardCard(theme: theme, accent: .success, padding: 18)
     }
 
     private func summaryCard(content: ChangelogContent) -> some View {

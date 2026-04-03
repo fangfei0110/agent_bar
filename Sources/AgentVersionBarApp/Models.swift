@@ -273,6 +273,10 @@ struct ProviderVersionSnapshot: Identifiable, Equatable, Sendable {
         errorDescription ?? status.displayTitle
     }
 
+    var changelogSourceURL: URL? {
+        provider.officialChangelogURL
+    }
+
     var changelogURL: URL? {
         guard status == .updateAvailable else {
             return nil
@@ -283,6 +287,10 @@ struct ProviderVersionSnapshot: Identifiable, Equatable, Sendable {
 
     var isChangelogAvailable: Bool {
         changelogURL != nil
+    }
+
+    var canOpenChangelog: Bool {
+        currentVersion != nil && latestVersion != nil && changelogSourceURL != nil
     }
 
     static func placeholder(for provider: ProviderKind) -> ProviderVersionSnapshot {

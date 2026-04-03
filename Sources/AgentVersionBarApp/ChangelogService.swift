@@ -1,6 +1,6 @@
 import Foundation
 
-struct ChangelogRequest: Equatable, Sendable {
+struct ChangelogRequest: Equatable, Hashable, Sendable {
     let provider: ProviderKind
     let currentVersion: String
     let latestVersion: String
@@ -29,7 +29,7 @@ struct ChangelogRequest: Equatable, Sendable {
             provider: snapshot.provider,
             currentVersion: snapshot.currentVersion,
             latestVersion: snapshot.latestVersion,
-            sourceURL: snapshot.changelogURL
+            sourceURL: snapshot.changelogSourceURL
         )
     }
 }
@@ -43,21 +43,55 @@ struct ChangelogContent: Equatable, Sendable {
 
 enum ChangelogViewState: Equatable, Sendable {
     case idle
-    case loading(ChangelogRequest)
+    case loading(ChangelogRequest, ChangelogLoadingPhase)
+    case showingOriginal(ChangelogContent)
     case loaded(ChangelogContent)
-    case failed(ChangelogRequest, String)
+    case unavailable(ProviderKind)
+    case failed(ProviderKind, String)
+}
+
+enum ChangelogLoadingPhase: Equatable, Sendable {
+    case fetching
+    case summarizing
+
+    var title: String {
+        switch self {
+        case .fetching:
+            return "Fetching official changelog"
+        case .summarizing:
+            return "Summarizing latest two versions"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .fetching:
+            return "Reading the official release notes page."
+        case .summarizing:
+            return "Generating a Chinese summary from the newest two versions."
+        }
+    }
 }
 
 struct ChangelogService: Sendable {
-    typealias Loader = @Sendable (ChangelogRequest) async throws -> ChangelogContent
+    typealias Extractor = @Sendable (ChangelogRequest) async throws -> String
+    typealias Summarizer = @Sendable (ChangelogRequest, String) async throws -> String
 
-    let load: Loader
+    let extract: Extractor
+    let summarize: Summarizer
 
-    static let live = ChangelogService { request in
-        try await Task.detached(priority: .userInitiated) {
-            try LiveChangelogLoader().load(request: request)
-        }.value
-    }
+    static let live = ChangelogService(
+        extract: { request in
+            try await Task.detached(priority: .userInitiated) {
+                try LiveChangelogLoader().extractOriginalContent(for: request)
+            }.value
+        },
+        summarize: { request, sourceContent in
+            try await Task.detached(priority: .userInitiated) {
+                try LiveChangelogLoader().summarize(request: request, sourceContent: sourceContent)
+            }.value
+        }
+    )
 
     static func latestVersionSections(from markdown: String, limit: Int = 2) -> String {
         let trimmed = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -92,34 +126,37 @@ struct ChangelogService: Sendable {
         请使用中文，总结 \(request.provider.displayName) 从已安装版本 \(request.currentVersion) 到可用版本 \(request.latestVersion) 的关键变化。只基于输入内容里的最近 2 个版本进行总结。重点提炼：用户可感知的新功能、重要修复、破坏性变更、迁移注意事项、升级风险。输出尽量简洁，适合开发者快速判断是否升级。
         """
     }
-}
 
-private struct LiveChangelogLoader {
-    func load(request: ChangelogRequest) throws -> ChangelogContent {
-        let originalContent = try extractOriginalContent(for: request)
-        let summaryInput = ChangelogService.latestVersionSections(from: originalContent, limit: 2)
-
-        do {
-            let summary = try summarize(request: request, sourceContent: summaryInput)
-            return ChangelogContent(
-                request: request,
-                summary: summary,
-                originalContent: originalContent,
-                summaryErrorDescription: nil
-            )
-        } catch {
-            return ChangelogContent(
-                request: request,
-                summary: nil,
-                originalContent: originalContent,
-                summaryErrorDescription: readableError(from: error)
-            )
+    static func summaryCommand(
+        for request: ChangelogRequest,
+        environment: ChangelogCommandEnvironment = .init(hasSummarize: true, hasCodex: true)
+    ) -> [String]? {
+        guard environment.hasSummarize else {
+            return nil
         }
+
+        var command = [
+            "/usr/bin/env",
+            "summarize",
+            "-",
+            "--plain",
+            "--no-color",
+            "--stream", "off",
+            "--metrics", "off",
+            "--length", "medium",
+            "--timeout", "30s",
+            "--prompt", summaryPrompt(for: request)
+        ]
+
+        if environment.hasCodex {
+            command.insert(contentsOf: ["--cli", "codex"], at: 3)
+        }
+
+        return command
     }
 
-    private func extractOriginalContent(for request: ChangelogRequest) throws -> String {
-        let output = try runCommand(
-            [
+    static func extractCommand(for request: ChangelogRequest) -> [String] {
+        [
             "/usr/bin/env",
             "summarize",
             request.sourceURL.absoluteString,
@@ -132,8 +169,31 @@ private struct LiveChangelogLoader {
             "--metrics", "off",
             "--timeout", "30s",
             "--max-extract-characters", "12000"
-            ]
-        )
+        ]
+    }
+
+    static func readableSummaryError(from error: Error) -> String {
+        if let serviceError = error as? ChangelogServiceError {
+            return serviceError.errorDescription ?? "Summary unavailable"
+        }
+
+        return error.localizedDescription
+    }
+}
+
+struct ChangelogCommandEnvironment: Equatable, Sendable {
+    let hasSummarize: Bool
+    let hasCodex: Bool
+}
+
+private struct LiveChangelogLoader {
+    func extractOriginalContent(for request: ChangelogRequest) throws -> String {
+        let environment = commandEnvironment()
+        guard environment.hasSummarize else {
+            throw ChangelogServiceError.extractionFailed("summarize is not installed")
+        }
+
+        let output = try runCommand(ChangelogService.extractCommand(for: request))
 
         let text = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         guard output.exitCode == 0, text.isEmpty == false else {
@@ -143,20 +203,14 @@ private struct LiveChangelogLoader {
         return text
     }
 
-    private func summarize(request: ChangelogRequest, sourceContent: String) throws -> String {
+    func summarize(request: ChangelogRequest, sourceContent: String) throws -> String {
+        let environment = commandEnvironment()
+        guard let command = ChangelogService.summaryCommand(for: request, environment: environment) else {
+            throw ChangelogServiceError.summaryUnavailable("summarize is not installed")
+        }
+
         let output = try runCommand(
-            [
-            "/usr/bin/env",
-            "summarize",
-            "-",
-            "--plain",
-            "--no-color",
-            "--stream", "off",
-            "--metrics", "off",
-            "--length", "medium",
-            "--timeout", "30s",
-            "--prompt", ChangelogService.summaryPrompt(for: request)
-            ],
+            command,
             stdin: sourceContent
         )
 
@@ -180,14 +234,16 @@ private struct LiveChangelogLoader {
         return message
     }
 
-    private func readableError(from error: Error) -> String {
-        if let serviceError = error as? ChangelogServiceError {
-            return serviceError.errorDescription ?? "Summary unavailable"
-        }
-
-        return error.localizedDescription
+    private func commandEnvironment() -> ChangelogCommandEnvironment {
+        let hasSummarize = commandExists("summarize")
+        let hasCodex = commandExists("codex")
+        return ChangelogCommandEnvironment(hasSummarize: hasSummarize, hasCodex: hasCodex)
     }
 
+    private func commandExists(_ name: String) -> Bool {
+        let output = try? runCommand(["/usr/bin/env", "sh", "-lc", "command -v \(name) >/dev/null 2>&1"])
+        return output?.exitCode == 0
+    }
     private func runCommand(_ command: [String], stdin: String? = nil) throws -> CommandOutput {
         guard let executable = command.first else {
             throw ChangelogServiceError.executionFailed("Missing executable")
@@ -209,22 +265,6 @@ private struct LiveChangelogLoader {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
         process.standardInput = stdinPipe
-
-        let group = DispatchGroup()
-        var stdoutData = Data()
-        var stderrData = Data()
-
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
-        }
-
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
-        }
 
         do {
             try process.run()
@@ -248,11 +288,11 @@ private struct LiveChangelogLoader {
         if process.isRunning {
             process.terminate()
             process.waitUntilExit()
-            group.wait()
             throw ChangelogServiceError.executionFailed("summarize command timed out")
         }
 
-        group.wait()
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
 
         return CommandOutput(
             exitCode: process.terminationStatus,
@@ -262,9 +302,10 @@ private struct LiveChangelogLoader {
     }
 }
 
-private enum ChangelogServiceError: LocalizedError {
+enum ChangelogServiceError: LocalizedError {
     case extractionFailed(String)
     case summaryFailed(String)
+    case summaryUnavailable(String)
     case executionFailed(String)
 
     var errorDescription: String? {
@@ -272,6 +313,8 @@ private enum ChangelogServiceError: LocalizedError {
         case let .extractionFailed(message):
             return message
         case let .summaryFailed(message):
+            return message
+        case let .summaryUnavailable(message):
             return message
         case let .executionFailed(message):
             return message

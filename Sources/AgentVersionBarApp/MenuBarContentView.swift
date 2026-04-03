@@ -17,10 +17,12 @@ struct MenuBarContentView: View {
             } else {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(model.visibleSnapshots) { snapshot in
+                        let canOpenChangelog = snapshot.canOpenChangelog || changelogModel.hasCachedContent(for: snapshot.provider)
                         ProviderCard(
                             snapshot: snapshot,
                             model: model,
                             theme: theme,
+                            canOpenChangelog: canOpenChangelog,
                             openChangelog: openChangelog
                         )
                     }
@@ -181,6 +183,7 @@ private struct ProviderCard: View {
     let snapshot: ProviderVersionSnapshot
     @ObservedObject var model: AppModel
     let theme: ThemePalette
+    let canOpenChangelog: Bool
     let openChangelog: (ProviderVersionSnapshot) -> Void
 
     var body: some View {
@@ -236,7 +239,7 @@ private struct ProviderCard: View {
             }
 
             HStack(spacing: 10) {
-                if snapshot.isChangelogAvailable {
+                if canOpenChangelog {
                     PanelActionButton(
                         title: "Changelog",
                         systemImage: "doc.text.magnifyingglass",

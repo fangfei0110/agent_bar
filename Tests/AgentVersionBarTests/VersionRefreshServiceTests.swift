@@ -186,7 +186,7 @@ struct VersionRefreshServiceTests {
     }
 
     @Test
-    func snapshotOnlyOffersChangelogWhenAnUpdateIsAvailable() {
+    func snapshotCanOpenChangelogWhenVersionsAreKnown() {
         let updateSnapshot = ProviderVersionSnapshot(
             provider: .codexCli,
             currentVersion: "0.116.0",
@@ -203,7 +203,7 @@ struct VersionRefreshServiceTests {
             errorDescription: nil
         )
 
-        let currentSnapshot = ProviderVersionSnapshot(
+        let upToDateSnapshot = ProviderVersionSnapshot(
             provider: .codexCli,
             currentVersion: "0.117.0",
             latestVersion: "0.117.0",
@@ -218,10 +218,26 @@ struct VersionRefreshServiceTests {
             checkedAt: Date(timeIntervalSince1970: 300),
             errorDescription: nil
         )
+        let currentSnapshot = ProviderVersionSnapshot(
+            provider: .codexCli,
+            currentVersion: "0.117.0",
+            latestVersion: nil,
+            executablePath: "/usr/local/bin/codex",
+            resolvedExecutablePath: "/usr/local/bin/codex",
+            configPath: "\(NSHomeDirectory())/.codex/config.toml",
+            installSource: .npm,
+            installMethodTitle: "npm global package (@openai/codex)",
+            updateMethodTitle: "npm install -g @openai/codex@latest",
+            terminalUpdateCommand: ["npm", "install", "-g", "@openai/codex@latest"],
+            isInstalled: true,
+            checkedAt: Date(timeIntervalSince1970: 300),
+            errorDescription: nil
+        )
 
         #expect(updateSnapshot.isChangelogAvailable == true)
         #expect(updateSnapshot.changelogURL == ProviderKind.codexCli.officialChangelogURL)
-        #expect(currentSnapshot.isChangelogAvailable == false)
-        #expect(currentSnapshot.changelogURL == nil)
+        #expect(upToDateSnapshot.canOpenChangelog == true)
+        #expect(upToDateSnapshot.changelogSourceURL == ProviderKind.codexCli.officialChangelogURL)
+        #expect(currentSnapshot.canOpenChangelog == false)
     }
 }
