@@ -1,51 +1,58 @@
 import Foundation
-import Testing
+import XCTest
 
 @testable import AgentVersionBarApp
 
-@Suite("VersionRefreshServiceTests")
-struct VersionRefreshServiceTests {
-    @Test
-    func extractJSONPayloadIgnoresNoise() {
+final class VersionRefreshServiceTests: XCTestCase {
+    func testExtractJSONPayloadIgnoresNoise() {
         let payload = VersionParsing.extractJSONPayload(from: """
         booting
         {"version":{"current":"1.2.0","latest":"1.3.0"}}
         trailing line
         """)
 
-        #expect(payload == #"{"version":{"current":"1.2.0","latest":"1.3.0"}}"#)
+        XCTAssertEqual(payload, #"{"version":{"current":"1.2.0","latest":"1.3.0"}}"#)
     }
 
-    @Test
-    func detectInstallSourceUnderstandsPackageManagers() {
-        #expect(
+    func testDetectInstallSourceUnderstandsPackageManagers() {
+        XCTAssertEqual(
             VersionParsing.detectInstallSource(
                 executablePath: "/opt/homebrew/Cellar/opencode/0.9.0/bin/opencode",
                 provider: .openCode
-            ) == .homebrew
+            ),
+            .homebrew
         )
-        #expect(
+        XCTAssertEqual(
             VersionParsing.detectInstallSource(
                 executablePath: "/usr/local/lib/node_modules/openclaw/bin/openclaw.js",
                 provider: .openClaw
-            ) == .npm
+            ),
+            .npm
         )
-        #expect(
+        XCTAssertEqual(
             VersionParsing.detectInstallSource(
                 executablePath: "/Users/test/Library/pnpm/global/5/.pnpm/opencode-ai@0.9.0/node_modules/opencode-ai/bin/opencode",
                 provider: .openCode
-            ) == .pnpm
+            ),
+            .pnpm
         )
-        #expect(
+        XCTAssertEqual(
             VersionParsing.detectInstallSource(
                 executablePath: "/Users/test/.npm/_npx/hash/node_modules/opencode-ai/bin/opencode",
                 provider: .openCode
-            ) == .npm
+            ),
+            .npm
+        )
+        XCTAssertEqual(
+            VersionParsing.detectInstallSource(
+                executablePath: "/Users/test/.hermes/hermes-agent/venv/bin/hermes",
+                provider: .hermes
+            ),
+            .nativeInstaller
         )
     }
 
-    @Test
-    func latestVersionFromBrewInfoSupportsFormulaeAndCasks() {
+    func testLatestVersionFromBrewInfoSupportsFormulaeAndCasks() {
         let formulaData = Data("""
         {"formulae":[{"versions":{"stable":"0.9.2"}}],"casks":[]}
         """.utf8)
@@ -53,12 +60,11 @@ struct VersionRefreshServiceTests {
         {"formulae":[],"casks":[{"version":"1.0.16"}]}
         """.utf8)
 
-        #expect(VersionParsing.latestVersionFromBrewInfo(data: formulaData) == "0.9.2")
-        #expect(VersionParsing.latestVersionFromBrewInfo(data: caskData) == "1.0.16")
+        XCTAssertEqual(VersionParsing.latestVersionFromBrewInfo(data: formulaData), "0.9.2")
+        XCTAssertEqual(VersionParsing.latestVersionFromBrewInfo(data: caskData), "1.0.16")
     }
 
-    @Test
-    func refreshUsesOpenClawStatusPayloadBeforeVersionCommand() {
+    func testRefreshUsesOpenClawStatusPayloadBeforeVersionCommand() {
         let service = VersionRefreshService(
             commandRunner: { command in
                 if command == ["/usr/bin/which", "openclaw"] {
@@ -84,17 +90,16 @@ struct VersionRefreshServiceTests {
 
         let snapshot = service.refresh(provider: .openClaw)
 
-        #expect(snapshot.currentVersion == "1.4.0")
-        #expect(snapshot.latestVersion == "1.5.0")
-        #expect(snapshot.status == .updateAvailable)
-        #expect(snapshot.executablePath == "/usr/local/bin/openclaw")
-        #expect(snapshot.resolvedExecutablePath?.contains("openclaw") == true)
-        #expect(snapshot.terminalUpdateCommand == ["/usr/local/bin/openclaw", "update"])
-        #expect(snapshot.checkedAt == Date(timeIntervalSince1970: 100))
+        XCTAssertEqual(snapshot.currentVersion, "1.4.0")
+        XCTAssertEqual(snapshot.latestVersion, "1.5.0")
+        XCTAssertEqual(snapshot.status, .updateAvailable)
+        XCTAssertEqual(snapshot.executablePath, "/usr/local/bin/openclaw")
+        XCTAssertTrue(snapshot.resolvedExecutablePath?.contains("openclaw") == true)
+        XCTAssertEqual(snapshot.terminalUpdateCommand, ["/usr/local/bin/openclaw", "update"])
+        XCTAssertEqual(snapshot.checkedAt, Date(timeIntervalSince1970: 100))
     }
 
-    @Test
-    func resolveWorkspacePathFindsRepoRootFromExecutablePath() throws {
+    func testResolveWorkspacePathFindsRepoRootFromExecutablePath() throws {
         let fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -115,11 +120,10 @@ struct VersionRefreshServiceTests {
             fileManager: fileManager
         )
 
-        #expect(workspacePath == rootURL.path)
+        XCTAssertEqual(workspacePath, rootURL.path)
     }
 
-    @Test
-    func resolveWorkspacePathFallsBackToCurrentDirectory() throws {
+    func testResolveWorkspacePathFallsBackToCurrentDirectory() throws {
         let fileManager = FileManager.default
         let currentDirectoryURL = fileManager.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -137,11 +141,10 @@ struct VersionRefreshServiceTests {
             fileManager: fileManager
         )
 
-        #expect(workspacePath == currentDirectoryURL.path)
+        XCTAssertEqual(workspacePath, currentDirectoryURL.path)
     }
 
-    @Test
-    func refreshUsesPackageManagerUpdateCommandForCodexCLI() {
+    func testRefreshUsesPackageManagerUpdateCommandForCodexCLI() {
         let service = VersionRefreshService(
             commandRunner: { command in
                 if command == ["/usr/bin/which", "codex"] {
@@ -167,26 +170,73 @@ struct VersionRefreshServiceTests {
 
         let snapshot = service.refresh(provider: .codexCli)
 
-        #expect(snapshot.currentVersion == "0.116.0")
-        #expect(snapshot.latestVersion == "0.117.0")
-        #expect(snapshot.installSource == .npm)
-        #expect(snapshot.status == .updateAvailable)
-        #expect(snapshot.updateMethodTitle == "npm install -g @openai/codex@latest")
-        #expect(snapshot.terminalUpdateCommand == ["npm", "install", "-g", "@openai/codex@latest"])
-        #expect(snapshot.configPath == "\(NSHomeDirectory())/.codex/config.toml")
-        #expect(snapshot.checkedAt == Date(timeIntervalSince1970: 200))
+        XCTAssertEqual(snapshot.currentVersion, "0.116.0")
+        XCTAssertEqual(snapshot.latestVersion, "0.117.0")
+        XCTAssertEqual(snapshot.installSource, .npm)
+        XCTAssertEqual(snapshot.status, .updateAvailable)
+        XCTAssertEqual(snapshot.updateMethodTitle, "npm install -g @openai/codex@latest")
+        XCTAssertEqual(snapshot.terminalUpdateCommand, ["npm", "install", "-g", "@openai/codex@latest"])
+        XCTAssertEqual(snapshot.configPath, "\(NSHomeDirectory())/.codex/config.toml")
+        XCTAssertEqual(snapshot.checkedAt, Date(timeIntervalSince1970: 200))
     }
 
-    @Test
-    func providersExposeOfficialChangelogURLs() {
-        #expect(ProviderKind.openClaw.officialChangelogURL?.absoluteString == "https://github.com/clawdbot/clawdbot/releases")
-        #expect(ProviderKind.openCode.officialChangelogURL?.absoluteString == "https://opencode.ai/changelog")
-        #expect(ProviderKind.claudeCode.officialChangelogURL?.absoluteString == "https://github.com/anthropics/claude-code/releases")
-        #expect(ProviderKind.codexCli.officialChangelogURL?.absoluteString == "https://github.com/openai/codex/releases")
+    func testRefreshUsesGitHubReleaseForHermes() {
+        let service = VersionRefreshService(
+            commandRunner: { command in
+                if command == ["/usr/bin/which", "hermes"] {
+                    return CommandOutput(
+                        exitCode: 0,
+                        stdout: "/Users/test/.hermes/hermes-agent/venv/bin/hermes\n",
+                        stderr: ""
+                    )
+                }
+
+                if command == ["/Users/test/.hermes/hermes-agent/venv/bin/hermes", "--version"] {
+                    return CommandOutput(
+                        exitCode: 0,
+                        stdout: "Hermes Agent v0.8.0 (2026.4.8)\nUp to date\n",
+                        stderr: ""
+                    )
+                }
+
+                if command == [
+                    "/usr/bin/curl",
+                    "-fsSL",
+                    "https://api.github.com/repos/NousResearch/hermes-agent/releases/latest"
+                ] {
+                    return CommandOutput(
+                        exitCode: 0,
+                        stdout: #"{"tag_name":"v2026.4.8","name":"Hermes Agent v0.8.0 (v2026.4.8)"}"#,
+                        stderr: ""
+                    )
+                }
+
+                return CommandOutput(exitCode: 1, stdout: "", stderr: "unexpected")
+            },
+            dateProvider: { Date(timeIntervalSince1970: 250) }
+        )
+
+        let snapshot = service.refresh(provider: .hermes)
+
+        XCTAssertEqual(snapshot.currentVersion, "0.8.0")
+        XCTAssertEqual(snapshot.latestVersion, "0.8.0")
+        XCTAssertEqual(snapshot.installSource, .nativeInstaller)
+        XCTAssertEqual(snapshot.status, .upToDate)
+        XCTAssertEqual(snapshot.updateMethodTitle, "/Users/test/.hermes/hermes-agent/venv/bin/hermes update")
+        XCTAssertEqual(snapshot.terminalUpdateCommand, ["/Users/test/.hermes/hermes-agent/venv/bin/hermes", "update"])
+        XCTAssertEqual(snapshot.configPath, "\(NSHomeDirectory())/.hermes/config.yaml")
+        XCTAssertEqual(snapshot.checkedAt, Date(timeIntervalSince1970: 250))
     }
 
-    @Test
-    func snapshotCanOpenChangelogWhenVersionsAreKnown() {
+    func testProvidersExposeOfficialChangelogURLs() {
+        XCTAssertEqual(ProviderKind.openClaw.officialChangelogURL?.absoluteString, "https://github.com/clawdbot/clawdbot/releases")
+        XCTAssertEqual(ProviderKind.openCode.officialChangelogURL?.absoluteString, "https://opencode.ai/changelog")
+        XCTAssertEqual(ProviderKind.claudeCode.officialChangelogURL?.absoluteString, "https://github.com/anthropics/claude-code/releases")
+        XCTAssertEqual(ProviderKind.codexCli.officialChangelogURL?.absoluteString, "https://github.com/openai/codex/releases")
+        XCTAssertEqual(ProviderKind.hermes.officialChangelogURL?.absoluteString, "https://github.com/NousResearch/hermes-agent/releases")
+    }
+
+    func testSnapshotCanOpenChangelogWhenVersionsAreKnown() {
         let updateSnapshot = ProviderVersionSnapshot(
             provider: .codexCli,
             currentVersion: "0.116.0",
@@ -234,10 +284,10 @@ struct VersionRefreshServiceTests {
             errorDescription: nil
         )
 
-        #expect(updateSnapshot.isChangelogAvailable == true)
-        #expect(updateSnapshot.changelogURL == ProviderKind.codexCli.officialChangelogURL)
-        #expect(upToDateSnapshot.canOpenChangelog == true)
-        #expect(upToDateSnapshot.changelogSourceURL == ProviderKind.codexCli.officialChangelogURL)
-        #expect(currentSnapshot.canOpenChangelog == false)
+        XCTAssertTrue(updateSnapshot.isChangelogAvailable)
+        XCTAssertEqual(updateSnapshot.changelogURL, ProviderKind.codexCli.officialChangelogURL)
+        XCTAssertTrue(upToDateSnapshot.canOpenChangelog)
+        XCTAssertEqual(upToDateSnapshot.changelogSourceURL, ProviderKind.codexCli.officialChangelogURL)
+        XCTAssertFalse(currentSnapshot.canOpenChangelog)
     }
 }

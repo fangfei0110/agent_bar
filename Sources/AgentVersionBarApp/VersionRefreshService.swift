@@ -113,6 +113,11 @@ struct VersionRefreshService: Sendable {
             }
         }
 
+        if let repository = provider.githubReleaseRepository,
+           let version = latestGitHubReleaseVersion(repository: repository) {
+            return version
+        }
+
         return nil
     }
 
@@ -144,6 +149,24 @@ struct VersionRefreshService: Sendable {
         case .nativeInstaller, .directBinary, .unknown:
             return nil
         }
+    }
+
+    private func latestGitHubReleaseVersion(repository: String) -> String? {
+        guard let data = runJSONCommand([
+            "/usr/bin/curl",
+            "-fsSL",
+            "https://api.github.com/repos/\(repository)/releases/latest"
+        ]),
+        let payload = try? JSONDecoder().decode(GitHubReleasePayload.self, from: data) else {
+            return nil
+        }
+
+        if let name = payload.name,
+           let version = VersionParsing.extractFirstVersion(from: name) {
+            return version
+        }
+
+        return VersionParsing.extractFirstVersion(from: payload.tagName)
     }
 
     private func resolveExecutablePath(for provider: ProviderKind) -> (commandPath: String?, resolvedPath: String?) {
@@ -376,6 +399,9 @@ enum VersionParsing {
         if provider == .claudeCode && normalized.contains("/claude code.app/") {
             return .nativeInstaller
         }
+        if provider == .hermes && normalized.contains("/.hermes/hermes-agent/") {
+            return .nativeInstaller
+        }
 
         return .directBinary
     }
@@ -414,4 +440,14 @@ private struct BrewVersionPayload: Decodable {
 
 private struct BrewCaskPayload: Decodable {
     let version: String?
+}
+
+private struct GitHubReleasePayload: Decodable {
+    let tagName: String
+    let name: String?
+
+    enum CodingKeys: String, CodingKey {
+        case tagName = "tag_name"
+        case name
+    }
 }

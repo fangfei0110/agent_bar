@@ -5,6 +5,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
     case openCode
     case claudeCode
     case codexCli
+    case hermes
 
     var id: String { rawValue }
 
@@ -18,6 +19,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return "Claude Code"
         case .codexCli:
             return "Codex CLI"
+        case .hermes:
+            return "Hermes Agent"
         }
     }
 
@@ -31,6 +34,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return "claude"
         case .codexCli:
             return "codex"
+        case .hermes:
+            return "hermes"
         }
     }
 
@@ -44,6 +49,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return "@anthropic-ai/claude-code"
         case .codexCli:
             return "@openai/codex"
+        case .hermes:
+            return "hermes-agent"
         }
     }
 
@@ -57,6 +64,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return nil
         case .codexCli:
             return "@openai/codex/bin/codex.js"
+        case .hermes:
+            return nil
         }
     }
 
@@ -69,6 +78,17 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
         case .claudeCode:
             return "claude-code"
         case .codexCli:
+            return nil
+        case .hermes:
+            return nil
+        }
+    }
+
+    var githubReleaseRepository: String? {
+        switch self {
+        case .hermes:
+            return "NousResearch/hermes-agent"
+        case .openClaw, .openCode, .claudeCode, .codexCli:
             return nil
         }
     }
@@ -83,6 +103,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return URL(string: "https://github.com/anthropics/claude-code/releases")
         case .codexCli:
             return URL(string: "https://github.com/openai/codex/releases")
+        case .hermes:
+            return URL(string: "https://github.com/NousResearch/hermes-agent/releases")
         }
     }
 
@@ -96,6 +118,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return [.npm, .homebrew]
         case .codexCli:
             return [.npm]
+        case .hermes:
+            return []
         }
     }
 
@@ -120,6 +144,10 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
         case .codexCli:
             return [
                 "\(home)/.codex/config.toml"
+            ]
+        case .hermes:
+            return [
+                "\(home)/.hermes/config.yaml"
             ]
         }
     }
@@ -155,6 +183,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return ["update"]
         case .codexCli:
             return nil
+        case .hermes:
+            return ["update"]
         }
     }
 
