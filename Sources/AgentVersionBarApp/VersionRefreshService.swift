@@ -48,7 +48,11 @@ struct VersionRefreshService: Sendable {
             ? openClawStatusVersions(executablePath: executablePath)
             : (current: nil, latest: nil)
         let current = statusVersions.current ?? currentVersion(for: provider, executablePath: executablePath)
-        let latest = statusVersions.latest ?? latestVersion(for: provider, installSource: installSource)
+        let latest = statusVersions.latest ?? latestVersion(
+            for: provider,
+            installSource: installSource,
+            executablePath: executablePath
+        )
         let updateCommand = terminalUpdateCommand(
             for: provider,
             executablePath: executablePath,
@@ -100,11 +104,24 @@ struct VersionRefreshService: Sendable {
             return nil
         }
 
+        if provider == .paperclip {
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: executablePath, isDirectory: &isDirectory),
+               isDirectory.boolValue {
+                return runTextCommand(["pnpm", "--dir", executablePath, "paperclipai", "--version"])
+                    .flatMap(VersionParsing.extractFirstVersion(from:))
+            }
+        }
+
         return runTextCommand([executablePath, "--version"])
             .flatMap(VersionParsing.extractFirstVersion(from:))
     }
 
-    private func latestVersion(for provider: ProviderKind, installSource: InstallSource) -> String? {
+    private func latestVersion(for provider: ProviderKind, installSource: InstallSource, executablePath: String?) -> String? {
+        if installSource == .sourceCheckout {
+            return sourceCheckoutBehindTitle(executablePath: executablePath)
+        }
+
         let lookupOrder = latestLookupOrder(for: provider, installSource: installSource)
 
         for source in lookupOrder {
@@ -121,9 +138,24 @@ struct VersionRefreshService: Sendable {
         return nil
     }
 
+    private func sourceCheckoutBehindTitle(executablePath: String?) -> String? {
+        guard let executablePath else {
+            return nil
+        }
+
+        guard runTextCommand(["git", "-C", executablePath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]) != nil,
+              let rawCount = runTextCommand(["git", "-C", executablePath, "rev-list", "--count", "HEAD..@{upstream}"]),
+              let count = Int(rawCount.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return nil
+        }
+
+        let noun = count == 1 ? "commit" : "commits"
+        return "\(count) \(noun) behind"
+    }
+
     private func latestLookupOrder(for provider: ProviderKind, installSource: InstallSource) -> [InstallSource] {
         var order: [InstallSource] = []
-        if installSource != .unknown, installSource != .directBinary, installSource != .nativeInstaller {
+        if installSource != .unknown, installSource != .directBinary, installSource != .nativeInstaller, installSource != .sourceCheckout {
             order.append(installSource)
         }
 
@@ -146,7 +178,7 @@ struct VersionRefreshService: Sendable {
         case .npm, .pnpm:
             return runTextCommand(["npm", "view", provider.npmPackage, "version"])
                 .flatMap(VersionParsing.extractFirstVersion(from:))
-        case .nativeInstaller, .directBinary, .unknown:
+        case .sourceCheckout, .nativeInstaller, .directBinary, .unknown:
             return nil
         }
     }
@@ -190,6 +222,10 @@ struct VersionRefreshService: Sendable {
         if let fallbackPath = executableFallbackCandidates(for: provider)
             .first(where: { FileManager.default.fileExists(atPath: $0) }) {
             return (fallbackPath, URL(fileURLWithPath: fallbackPath).resolvingSymlinksInPath().path)
+        }
+
+        if let sourcePath = sourceCheckoutCandidate(for: provider) {
+            return (sourcePath, sourcePath)
         }
 
         return (nil, nil)
@@ -238,6 +274,28 @@ struct VersionRefreshService: Sendable {
         }
 
         return nil
+    }
+
+    private func sourceCheckoutCandidate(for provider: ProviderKind) -> String? {
+        guard provider == .paperclip else {
+            return nil
+        }
+
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+        let candidates = [
+            "\(home)/projects/paperclip",
+            "\(home)/src/paperclip",
+            "\(home)/code/paperclip"
+        ]
+
+        return candidates.first(where: isPaperclipSourceCheckout)
+    }
+
+    private func isPaperclipSourceCheckout(_ path: String) -> Bool {
+        let fileManager = FileManager.default
+        let packageJSON = URL(fileURLWithPath: path).appendingPathComponent("package.json").path
+        let cliPackageJSON = URL(fileURLWithPath: path).appendingPathComponent("cli/package.json").path
+        return fileManager.fileExists(atPath: packageJSON) && fileManager.fileExists(atPath: cliPackageJSON)
     }
 
     private func resolveConfigPath(for provider: ProviderKind) -> String {
@@ -401,6 +459,12 @@ enum VersionParsing {
         }
         if provider == .hermes && normalized.contains("/.hermes/hermes-agent/") {
             return .nativeInstaller
+        }
+        if provider == .paperclip &&
+            (normalized.contains("/projects/paperclip") ||
+             normalized.contains("/src/paperclip") ||
+             normalized.contains("/code/paperclip")) {
+            return .sourceCheckout
         }
 
         return .directBinary

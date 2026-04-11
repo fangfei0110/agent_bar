@@ -7,6 +7,7 @@ Lightweight macOS menu bar app for tracking installed and latest versions of:
 - Claude Code
 - Codex CLI
 - Hermes Agent
+- Paperclip
 
 ## What It Shows
 
@@ -33,6 +34,9 @@ Lightweight macOS menu bar app for tracking installed and latest versions of:
 - `Hermes Agent`
   - Current: `hermes --version`
   - Latest: GitHub latest release for `NousResearch/hermes-agent`
+- `Paperclip`
+  - Current: `paperclipai --version`
+  - Latest: `npm view paperclipai version`
 
 ## Run
 

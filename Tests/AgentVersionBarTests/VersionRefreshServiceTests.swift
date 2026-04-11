@@ -50,6 +50,20 @@ final class VersionRefreshServiceTests: XCTestCase {
             ),
             .nativeInstaller
         )
+        XCTAssertEqual(
+            VersionParsing.detectInstallSource(
+                executablePath: "/usr/local/lib/node_modules/paperclipai/dist/index.js",
+                provider: .paperclip
+            ),
+            .npm
+        )
+        XCTAssertEqual(
+            VersionParsing.detectInstallSource(
+                executablePath: "/Users/test/projects/paperclip",
+                provider: .paperclip
+            ),
+            .sourceCheckout
+        )
     }
 
     func testLatestVersionFromBrewInfoSupportsFormulaeAndCasks() {
@@ -228,12 +242,126 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.checkedAt, Date(timeIntervalSince1970: 250))
     }
 
+    func testRefreshUsesPackageManagerUpdateCommandForPaperclip() {
+        let service = VersionRefreshService(
+            commandRunner: { command in
+                if command == ["/usr/bin/which", "paperclipai"] {
+                    return CommandOutput(
+                        exitCode: 0,
+                        stdout: "/usr/local/lib/node_modules/paperclipai/dist/index.js\n",
+                        stderr: ""
+                    )
+                }
+
+                if command == ["/usr/local/lib/node_modules/paperclipai/dist/index.js", "--version"] {
+                    return CommandOutput(exitCode: 0, stdout: "paperclipai 2026.402.0\n", stderr: "")
+                }
+
+                if command == ["npm", "view", "paperclipai", "version"] {
+                    return CommandOutput(exitCode: 0, stdout: "2026.403.0\n", stderr: "")
+                }
+
+                return CommandOutput(exitCode: 1, stdout: "", stderr: "unexpected")
+            },
+            dateProvider: { Date(timeIntervalSince1970: 275) }
+        )
+
+        let snapshot = service.refresh(provider: .paperclip)
+
+        XCTAssertEqual(snapshot.currentVersion, "2026.402.0")
+        XCTAssertEqual(snapshot.latestVersion, "2026.403.0")
+        XCTAssertEqual(snapshot.installSource, .npm)
+        XCTAssertEqual(snapshot.status, .updateAvailable)
+        XCTAssertEqual(snapshot.updateMethodTitle, "npm install -g paperclipai@latest")
+        XCTAssertEqual(snapshot.terminalUpdateCommand, ["npm", "install", "-g", "paperclipai@latest"])
+        XCTAssertEqual(snapshot.configPath, "\(NSHomeDirectory())/.paperclip/instances/default/config.json")
+        XCTAssertEqual(snapshot.checkedAt, Date(timeIntervalSince1970: 275))
+    }
+
+    func testRefreshUsesSourceCheckoutForPaperclipWhenCliIsNotOnPath() throws {
+        let fileManager = FileManager.default
+        let originalHome = NSHomeDirectory()
+        let homeURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let repoURL = homeURL.appendingPathComponent("projects/paperclip", isDirectory: true)
+
+        try fileManager.createDirectory(at: repoURL.appendingPathComponent("cli", isDirectory: true), withIntermediateDirectories: true)
+        try "{}\n".write(to: repoURL.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+        try "{}\n".write(to: repoURL.appendingPathComponent("cli/package.json"), atomically: true, encoding: .utf8)
+
+        setenv("HOME", homeURL.path, 1)
+        defer {
+            setenv("HOME", originalHome, 1)
+            try? fileManager.removeItem(at: homeURL)
+        }
+
+        let service = VersionRefreshService(
+            commandRunner: { command in
+                if command == ["/usr/bin/which", "paperclipai"] {
+                    return CommandOutput(exitCode: 1, stdout: "", stderr: "not found")
+                }
+
+                if command == ["/bin/zsh", "-lc", "command -v paperclipai 2>/dev/null"] {
+                    return CommandOutput(exitCode: 1, stdout: "", stderr: "")
+                }
+
+                if command == ["pnpm", "--dir", repoURL.path, "paperclipai", "--version"] {
+                    return CommandOutput(exitCode: 0, stdout: "0.3.1\n", stderr: "")
+                }
+
+                if command == ["git", "-C", repoURL.path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"] {
+                    return CommandOutput(exitCode: 0, stdout: "origin/master\n", stderr: "")
+                }
+
+                if command == ["git", "-C", repoURL.path, "rev-list", "--count", "HEAD..@{upstream}"] {
+                    return CommandOutput(exitCode: 0, stdout: "7\n", stderr: "")
+                }
+
+                return CommandOutput(exitCode: 1, stdout: "", stderr: "unexpected")
+            },
+            dateProvider: { Date(timeIntervalSince1970: 280) }
+        )
+
+        let snapshot = service.refresh(provider: .paperclip)
+
+        XCTAssertEqual(snapshot.executablePath, repoURL.path)
+        XCTAssertEqual(snapshot.installSource, .sourceCheckout)
+        XCTAssertEqual(snapshot.installMethodTitle, "Source checkout")
+        XCTAssertEqual(snapshot.currentVersion, "0.3.1")
+        XCTAssertEqual(snapshot.latestVersion, "7 commits behind")
+        XCTAssertEqual(snapshot.status, .updateAvailable)
+        XCTAssertEqual(snapshot.updateMethodTitle, "Manual update")
+        XCTAssertNil(snapshot.terminalUpdateCommand)
+    }
+
+    func testSourceCheckoutStatusUsesCommitLagInsteadOfVersionComparison() {
+        let snapshot = ProviderVersionSnapshot(
+            provider: .paperclip,
+            currentVersion: "0.3.1",
+            latestVersion: "0 commits behind",
+            executablePath: "/Users/test/projects/paperclip",
+            resolvedExecutablePath: "/Users/test/projects/paperclip",
+            configPath: "\(NSHomeDirectory())/.paperclip/instances/default/config.json",
+            installSource: .sourceCheckout,
+            installMethodTitle: "Source checkout",
+            updateMethodTitle: "Manual update",
+            terminalUpdateCommand: nil,
+            isInstalled: true,
+            checkedAt: Date(timeIntervalSince1970: 281),
+            errorDescription: nil
+        )
+
+        XCTAssertEqual(snapshot.status, .upToDate)
+        XCTAssertEqual(snapshot.latestTitle, "0 commits behind")
+        XCTAssertFalse(snapshot.canOpenChangelog)
+    }
+
     func testProvidersExposeOfficialChangelogURLs() {
         XCTAssertEqual(ProviderKind.openClaw.officialChangelogURL?.absoluteString, "https://github.com/clawdbot/clawdbot/releases")
         XCTAssertEqual(ProviderKind.openCode.officialChangelogURL?.absoluteString, "https://opencode.ai/changelog")
         XCTAssertEqual(ProviderKind.claudeCode.officialChangelogURL?.absoluteString, "https://github.com/anthropics/claude-code/releases")
         XCTAssertEqual(ProviderKind.codexCli.officialChangelogURL?.absoluteString, "https://github.com/openai/codex/releases")
         XCTAssertEqual(ProviderKind.hermes.officialChangelogURL?.absoluteString, "https://github.com/NousResearch/hermes-agent/releases")
+        XCTAssertEqual(ProviderKind.paperclip.officialChangelogURL?.absoluteString, "https://github.com/paperclipai/paperclip/releases")
     }
 
     func testSnapshotCanOpenChangelogWhenVersionsAreKnown() {
