@@ -203,6 +203,10 @@ struct VersionRefreshService: Sendable {
 
     private func resolveExecutablePath(for provider: ProviderKind) -> (commandPath: String?, resolvedPath: String?) {
         let executable = provider.executableName
+        if let interactivePath = interactiveShellExecutablePath(for: executable) {
+            return (interactivePath, URL(fileURLWithPath: interactivePath).resolvingSymlinksInPath().path)
+        }
+
         let output = commandRunner(["/usr/bin/which", executable])
         if output.exitCode == 0 {
             let path = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -229,6 +233,31 @@ struct VersionRefreshService: Sendable {
         }
 
         return (nil, nil)
+    }
+
+    private func interactiveShellExecutablePath(for executable: String) -> String? {
+        let startMarker = "__AGENT_VERSION_BAR_START__"
+        let endMarker = "__AGENT_VERSION_BAR_END__"
+        let script = """
+        printf '\(startMarker)\\n'
+        whence -p \(Self.shellQuoted(executable))
+        printf '\(endMarker)\\n'
+        """
+
+        let output = commandRunner(["/bin/zsh", "-lic", script])
+        guard output.exitCode == 0,
+              let section = VersionParsing.extractMarkedSection(
+                from: output.stdout,
+                startMarker: startMarker,
+                endMarker: endMarker
+              ) else {
+            return nil
+        }
+
+        return section
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { $0.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: $0) })
     }
 
     private func executableFallbackCandidates(for provider: ProviderKind) -> [String] {
@@ -437,6 +466,17 @@ enum VersionParsing {
         }
 
         return String(text[start...end])
+    }
+
+    static func extractMarkedSection(from text: String, startMarker: String, endMarker: String) -> String? {
+        guard let startRange = text.range(of: startMarker),
+              let endRange = text.range(of: endMarker),
+              startRange.upperBound <= endRange.lowerBound else {
+            return nil
+        }
+
+        return String(text[startRange.upperBound..<endRange.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func detectInstallSource(executablePath: String?, provider: ProviderKind) -> InstallSource {

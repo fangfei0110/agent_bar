@@ -14,6 +14,24 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(payload, #"{"version":{"current":"1.2.0","latest":"1.3.0"}}"#)
     }
 
+    func testExtractMarkedSectionIgnoresShellNoise() {
+        let text = """
+        startup noise
+        __AGENT_VERSION_BAR_START__
+        /opt/homebrew/bin/codex
+        __AGENT_VERSION_BAR_END__
+        trailing noise
+        """
+
+        let payload = VersionParsing.extractMarkedSection(
+            from: text,
+            startMarker: "__AGENT_VERSION_BAR_START__",
+            endMarker: "__AGENT_VERSION_BAR_END__"
+        )
+
+        XCTAssertEqual(payload, "/opt/homebrew/bin/codex")
+    }
+
     func testDetectInstallSourceUnderstandsPackageManagers() {
         XCTAssertEqual(
             VersionParsing.detectInstallSource(
@@ -81,6 +99,10 @@ final class VersionRefreshServiceTests: XCTestCase {
     func testRefreshUsesOpenClawStatusPayloadBeforeVersionCommand() {
         let service = VersionRefreshService(
             commandRunner: { command in
+                if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'openclaw'") == true {
+                    return CommandOutput(exitCode: 1, stdout: "", stderr: "")
+                }
+
                 if command == ["/usr/bin/which", "openclaw"] {
                     return CommandOutput(exitCode: 0, stdout: "/usr/local/bin/openclaw\n", stderr: "")
                 }
@@ -161,6 +183,10 @@ final class VersionRefreshServiceTests: XCTestCase {
     func testRefreshUsesPackageManagerUpdateCommandForCodexCLI() {
         let service = VersionRefreshService(
             commandRunner: { command in
+                if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'codex'") == true {
+                    return CommandOutput(exitCode: 1, stdout: "", stderr: "")
+                }
+
                 if command == ["/usr/bin/which", "codex"] {
                     return CommandOutput(
                         exitCode: 0,
@@ -194,9 +220,53 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.checkedAt, Date(timeIntervalSince1970: 200))
     }
 
+    func testRefreshPrefersInteractiveShellPathForCodexCLI() {
+        let service = VersionRefreshService(
+            commandRunner: { command in
+                if command.first == "/bin/zsh",
+                   command.dropFirst().first == "-lic",
+                   command.last?.contains("whence -p 'codex'") == true {
+                    return CommandOutput(
+                        exitCode: 0,
+                        stdout: """
+                        shell startup noise
+                        __AGENT_VERSION_BAR_START__
+                        /opt/homebrew/bin/codex
+                        __AGENT_VERSION_BAR_END__
+                        """,
+                        stderr: ""
+                    )
+                }
+
+                if command == ["/opt/homebrew/bin/codex", "--version"] {
+                    return CommandOutput(exitCode: 0, stdout: "codex-cli 0.120.0\n", stderr: "")
+                }
+
+                if command == ["npm", "view", "@openai/codex", "version"] {
+                    return CommandOutput(exitCode: 0, stdout: "0.120.0\n", stderr: "")
+                }
+
+                return CommandOutput(exitCode: 1, stdout: "", stderr: "unexpected")
+            },
+            dateProvider: { Date(timeIntervalSince1970: 201) }
+        )
+
+        let snapshot = service.refresh(provider: .codexCli)
+
+        XCTAssertEqual(snapshot.executablePath, "/opt/homebrew/bin/codex")
+        XCTAssertEqual(snapshot.resolvedExecutablePath, "/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js")
+        XCTAssertEqual(snapshot.currentVersion, "0.120.0")
+        XCTAssertEqual(snapshot.latestVersion, "0.120.0")
+        XCTAssertEqual(snapshot.status, .upToDate)
+    }
+
     func testRefreshUsesGitHubReleaseForHermes() {
         let service = VersionRefreshService(
             commandRunner: { command in
+                if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'hermes'") == true {
+                    return CommandOutput(exitCode: 1, stdout: "", stderr: "")
+                }
+
                 if command == ["/usr/bin/which", "hermes"] {
                     return CommandOutput(
                         exitCode: 0,
@@ -245,6 +315,10 @@ final class VersionRefreshServiceTests: XCTestCase {
     func testRefreshUsesPackageManagerUpdateCommandForPaperclip() {
         let service = VersionRefreshService(
             commandRunner: { command in
+                if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'paperclipai'") == true {
+                    return CommandOutput(exitCode: 1, stdout: "", stderr: "")
+                }
+
                 if command == ["/usr/bin/which", "paperclipai"] {
                     return CommandOutput(
                         exitCode: 0,
@@ -296,6 +370,10 @@ final class VersionRefreshServiceTests: XCTestCase {
 
         let service = VersionRefreshService(
             commandRunner: { command in
+                if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'paperclipai'") == true {
+                    return CommandOutput(exitCode: 1, stdout: "", stderr: "")
+                }
+
                 if command == ["/usr/bin/which", "paperclipai"] {
                     return CommandOutput(exitCode: 1, stdout: "", stderr: "not found")
                 }
