@@ -5,6 +5,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
     case openCode
     case claudeCode
     case codexCli
+    case hermes
+    case paperclip
 
     var id: String { rawValue }
 
@@ -18,6 +20,10 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return "Claude Code"
         case .codexCli:
             return "Codex CLI"
+        case .hermes:
+            return "Hermes Agent"
+        case .paperclip:
+            return "Paperclip"
         }
     }
 
@@ -31,6 +37,10 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return "claude"
         case .codexCli:
             return "codex"
+        case .hermes:
+            return "hermes"
+        case .paperclip:
+            return "paperclipai"
         }
     }
 
@@ -44,6 +54,10 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return "@anthropic-ai/claude-code"
         case .codexCli:
             return "@openai/codex"
+        case .hermes:
+            return "hermes-agent"
+        case .paperclip:
+            return "paperclipai"
         }
     }
 
@@ -57,6 +71,10 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return nil
         case .codexCli:
             return "@openai/codex/bin/codex.js"
+        case .hermes:
+            return nil
+        case .paperclip:
+            return "paperclipai/dist/index.js"
         }
     }
 
@@ -69,6 +87,19 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
         case .claudeCode:
             return "claude-code"
         case .codexCli:
+            return nil
+        case .hermes:
+            return nil
+        case .paperclip:
+            return nil
+        }
+    }
+
+    var githubReleaseRepository: String? {
+        switch self {
+        case .hermes:
+            return "NousResearch/hermes-agent"
+        case .openClaw, .openCode, .claudeCode, .codexCli, .paperclip:
             return nil
         }
     }
@@ -83,6 +114,10 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return URL(string: "https://github.com/anthropics/claude-code/releases")
         case .codexCli:
             return URL(string: "https://github.com/openai/codex/releases")
+        case .hermes:
+            return URL(string: "https://github.com/NousResearch/hermes-agent/releases")
+        case .paperclip:
+            return URL(string: "https://github.com/paperclipai/paperclip/releases")
         }
     }
 
@@ -95,6 +130,10 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
         case .claudeCode:
             return [.npm, .homebrew]
         case .codexCli:
+            return [.npm]
+        case .hermes:
+            return []
+        case .paperclip:
             return [.npm]
         }
     }
@@ -121,6 +160,14 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return [
                 "\(home)/.codex/config.toml"
             ]
+        case .hermes:
+            return [
+                "\(home)/.hermes/config.yaml"
+            ]
+        case .paperclip:
+            return [
+                "\(home)/.paperclip/instances/default/config.json"
+            ]
         }
     }
 
@@ -136,6 +183,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return "npm global package (\(npmPackage))"
         case .pnpm:
             return "pnpm global package (\(npmPackage))"
+        case .sourceCheckout:
+            return "Source checkout"
         case .nativeInstaller:
             return "Native installer"
         case .directBinary:
@@ -155,6 +204,10 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return ["update"]
         case .codexCli:
             return nil
+        case .hermes:
+            return ["update"]
+        case .paperclip:
+            return nil
         }
     }
 
@@ -172,7 +225,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Sendable {
             return ["npm", "install", "-g", "\(npmPackage)@latest"]
         case .pnpm:
             return ["pnpm", "add", "-g", "\(npmPackage)@latest"]
-        case .nativeInstaller, .directBinary, .unknown:
+        case .sourceCheckout, .nativeInstaller, .directBinary, .unknown:
             return nil
         }
     }
@@ -186,6 +239,7 @@ enum InstallSource: String, Equatable, Sendable {
     case homebrew
     case npm
     case pnpm
+    case sourceCheckout
     case nativeInstaller
     case directBinary
     case unknown
@@ -198,6 +252,8 @@ enum InstallSource: String, Equatable, Sendable {
             return "npm"
         case .pnpm:
             return "pnpm"
+        case .sourceCheckout:
+            return "Source Checkout"
         case .nativeInstaller:
             return "Native Installer"
         case .directBinary:
@@ -249,6 +305,10 @@ struct ProviderVersionSnapshot: Identifiable, Equatable, Sendable {
     var id: String { provider.id }
 
     var status: VersionStatus {
+        if let commitsBehind = sourceCheckoutCommitsBehind {
+            return commitsBehind == 0 ? .upToDate : .updateAvailable
+        }
+
         switch (currentVersion, latestVersion) {
         case let (current?, latest?):
             return current == latest ? .upToDate : .updateAvailable
@@ -269,6 +329,16 @@ struct ProviderVersionSnapshot: Identifiable, Equatable, Sendable {
         latestVersion ?? "Unavailable"
     }
 
+    var sourceCheckoutCommitsBehind: Int? {
+        guard installSource == .sourceCheckout,
+              let latestVersion,
+              let match = latestVersion.range(of: #"\d+"#, options: .regularExpression) else {
+            return nil
+        }
+
+        return Int(latestVersion[match])
+    }
+
     var errorTitle: String {
         errorDescription ?? status.displayTitle
     }
@@ -278,7 +348,7 @@ struct ProviderVersionSnapshot: Identifiable, Equatable, Sendable {
     }
 
     var changelogURL: URL? {
-        guard status == .updateAvailable else {
+        guard status == .updateAvailable, installSource != .sourceCheckout else {
             return nil
         }
 
@@ -290,7 +360,7 @@ struct ProviderVersionSnapshot: Identifiable, Equatable, Sendable {
     }
 
     var canOpenChangelog: Bool {
-        currentVersion != nil && latestVersion != nil && changelogSourceURL != nil
+        currentVersion != nil && latestVersion != nil && changelogSourceURL != nil && installSource != .sourceCheckout
     }
 
     static func placeholder(for provider: ProviderKind) -> ProviderVersionSnapshot {

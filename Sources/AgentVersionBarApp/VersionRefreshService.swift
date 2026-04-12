@@ -48,7 +48,11 @@ struct VersionRefreshService: Sendable {
             ? openClawStatusVersions(executablePath: executablePath)
             : (current: nil, latest: nil)
         let current = statusVersions.current ?? currentVersion(for: provider, executablePath: executablePath)
-        let latest = statusVersions.latest ?? latestVersion(for: provider, installSource: installSource)
+        let latest = statusVersions.latest ?? latestVersion(
+            for: provider,
+            installSource: installSource,
+            executablePath: executablePath
+        )
         let updateCommand = terminalUpdateCommand(
             for: provider,
             executablePath: executablePath,
@@ -100,11 +104,24 @@ struct VersionRefreshService: Sendable {
             return nil
         }
 
+        if provider == .paperclip {
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: executablePath, isDirectory: &isDirectory),
+               isDirectory.boolValue {
+                return runTextCommand(["pnpm", "--dir", executablePath, "paperclipai", "--version"])
+                    .flatMap(VersionParsing.extractFirstVersion(from:))
+            }
+        }
+
         return runTextCommand([executablePath, "--version"])
             .flatMap(VersionParsing.extractFirstVersion(from:))
     }
 
-    private func latestVersion(for provider: ProviderKind, installSource: InstallSource) -> String? {
+    private func latestVersion(for provider: ProviderKind, installSource: InstallSource, executablePath: String?) -> String? {
+        if installSource == .sourceCheckout {
+            return sourceCheckoutBehindTitle(executablePath: executablePath)
+        }
+
         let lookupOrder = latestLookupOrder(for: provider, installSource: installSource)
 
         for source in lookupOrder {
@@ -113,12 +130,32 @@ struct VersionRefreshService: Sendable {
             }
         }
 
+        if let repository = provider.githubReleaseRepository,
+           let version = latestGitHubReleaseVersion(repository: repository) {
+            return version
+        }
+
         return nil
+    }
+
+    private func sourceCheckoutBehindTitle(executablePath: String?) -> String? {
+        guard let executablePath else {
+            return nil
+        }
+
+        guard runTextCommand(["git", "-C", executablePath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]) != nil,
+              let rawCount = runTextCommand(["git", "-C", executablePath, "rev-list", "--count", "HEAD..@{upstream}"]),
+              let count = Int(rawCount.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return nil
+        }
+
+        let noun = count == 1 ? "commit" : "commits"
+        return "\(count) \(noun) behind"
     }
 
     private func latestLookupOrder(for provider: ProviderKind, installSource: InstallSource) -> [InstallSource] {
         var order: [InstallSource] = []
-        if installSource != .unknown, installSource != .directBinary, installSource != .nativeInstaller {
+        if installSource != .unknown, installSource != .directBinary, installSource != .nativeInstaller, installSource != .sourceCheckout {
             order.append(installSource)
         }
 
@@ -141,13 +178,35 @@ struct VersionRefreshService: Sendable {
         case .npm, .pnpm:
             return runTextCommand(["npm", "view", provider.npmPackage, "version"])
                 .flatMap(VersionParsing.extractFirstVersion(from:))
-        case .nativeInstaller, .directBinary, .unknown:
+        case .sourceCheckout, .nativeInstaller, .directBinary, .unknown:
             return nil
         }
     }
 
+    private func latestGitHubReleaseVersion(repository: String) -> String? {
+        guard let data = runJSONCommand([
+            "/usr/bin/curl",
+            "-fsSL",
+            "https://api.github.com/repos/\(repository)/releases/latest"
+        ]),
+        let payload = try? JSONDecoder().decode(GitHubReleasePayload.self, from: data) else {
+            return nil
+        }
+
+        if let name = payload.name,
+           let version = VersionParsing.extractFirstVersion(from: name) {
+            return version
+        }
+
+        return VersionParsing.extractFirstVersion(from: payload.tagName)
+    }
+
     private func resolveExecutablePath(for provider: ProviderKind) -> (commandPath: String?, resolvedPath: String?) {
         let executable = provider.executableName
+        if let interactivePath = interactiveShellExecutablePath(for: executable) {
+            return (interactivePath, URL(fileURLWithPath: interactivePath).resolvingSymlinksInPath().path)
+        }
+
         let output = commandRunner(["/usr/bin/which", executable])
         if output.exitCode == 0 {
             let path = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -169,7 +228,36 @@ struct VersionRefreshService: Sendable {
             return (fallbackPath, URL(fileURLWithPath: fallbackPath).resolvingSymlinksInPath().path)
         }
 
+        if let sourcePath = sourceCheckoutCandidate(for: provider) {
+            return (sourcePath, sourcePath)
+        }
+
         return (nil, nil)
+    }
+
+    private func interactiveShellExecutablePath(for executable: String) -> String? {
+        let startMarker = "__AGENT_VERSION_BAR_START__"
+        let endMarker = "__AGENT_VERSION_BAR_END__"
+        let script = """
+        printf '\(startMarker)\\n'
+        whence -p \(Self.shellQuoted(executable))
+        printf '\(endMarker)\\n'
+        """
+
+        let output = commandRunner(["/bin/zsh", "-lic", script])
+        guard output.exitCode == 0,
+              let section = VersionParsing.extractMarkedSection(
+                from: output.stdout,
+                startMarker: startMarker,
+                endMarker: endMarker
+              ) else {
+            return nil
+        }
+
+        return section
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { $0.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: $0) })
     }
 
     private func executableFallbackCandidates(for provider: ProviderKind) -> [String] {
@@ -215,6 +303,28 @@ struct VersionRefreshService: Sendable {
         }
 
         return nil
+    }
+
+    private func sourceCheckoutCandidate(for provider: ProviderKind) -> String? {
+        guard provider == .paperclip else {
+            return nil
+        }
+
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+        let candidates = [
+            "\(home)/projects/paperclip",
+            "\(home)/src/paperclip",
+            "\(home)/code/paperclip"
+        ]
+
+        return candidates.first(where: isPaperclipSourceCheckout)
+    }
+
+    private func isPaperclipSourceCheckout(_ path: String) -> Bool {
+        let fileManager = FileManager.default
+        let packageJSON = URL(fileURLWithPath: path).appendingPathComponent("package.json").path
+        let cliPackageJSON = URL(fileURLWithPath: path).appendingPathComponent("cli/package.json").path
+        return fileManager.fileExists(atPath: packageJSON) && fileManager.fileExists(atPath: cliPackageJSON)
     }
 
     private func resolveConfigPath(for provider: ProviderKind) -> String {
@@ -358,6 +468,17 @@ enum VersionParsing {
         return String(text[start...end])
     }
 
+    static func extractMarkedSection(from text: String, startMarker: String, endMarker: String) -> String? {
+        guard let startRange = text.range(of: startMarker),
+              let endRange = text.range(of: endMarker),
+              startRange.upperBound <= endRange.lowerBound else {
+            return nil
+        }
+
+        return String(text[startRange.upperBound..<endRange.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static func detectInstallSource(executablePath: String?, provider: ProviderKind) -> InstallSource {
         guard let executablePath else {
             return .unknown
@@ -375,6 +496,15 @@ enum VersionParsing {
         }
         if provider == .claudeCode && normalized.contains("/claude code.app/") {
             return .nativeInstaller
+        }
+        if provider == .hermes && normalized.contains("/.hermes/hermes-agent/") {
+            return .nativeInstaller
+        }
+        if provider == .paperclip &&
+            (normalized.contains("/projects/paperclip") ||
+             normalized.contains("/src/paperclip") ||
+             normalized.contains("/code/paperclip")) {
+            return .sourceCheckout
         }
 
         return .directBinary
@@ -414,4 +544,14 @@ private struct BrewVersionPayload: Decodable {
 
 private struct BrewCaskPayload: Decodable {
     let version: String?
+}
+
+private struct GitHubReleasePayload: Decodable {
+    let tagName: String
+    let name: String?
+
+    enum CodingKeys: String, CodingKey {
+        case tagName = "tag_name"
+        case name
+    }
 }
