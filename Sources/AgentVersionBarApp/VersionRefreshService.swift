@@ -44,9 +44,15 @@ struct VersionRefreshService: Sendable {
             provider: provider
         )
         let configPath = resolveConfigPath(for: provider)
-        let statusVersions = provider == .openClaw
-            ? openClawStatusVersions(executablePath: executablePath)
-            : (current: nil, latest: nil)
+        let statusVersions: (current: String?, latest: String?)
+        switch provider {
+        case .openClaw:
+            statusVersions = openClawStatusVersions(executablePath: executablePath)
+        case .hermes:
+            statusVersions = hermesStatusVersions(executablePath: executablePath)
+        default:
+            statusVersions = (current: nil, latest: nil)
+        }
         let current = statusVersions.current ?? currentVersion(for: provider, executablePath: executablePath)
         let latest = statusVersions.latest ?? latestVersion(
             for: provider,
@@ -97,6 +103,23 @@ struct VersionRefreshService: Sendable {
             payload.version?.current ?? payload.runtimeVersion,
             payload.version?.latest
         )
+    }
+
+    private func hermesStatusVersions(executablePath: String?) -> (current: String?, latest: String?) {
+        guard let executablePath,
+              let output = runTextCommand([executablePath, "--version"]) else {
+            return (nil, nil)
+        }
+
+        let current = VersionParsing.extractFirstVersion(from: output)
+        let latest: String?
+        if output.localizedCaseInsensitiveContains("up to date") {
+            latest = current
+        } else {
+            latest = nil
+        }
+
+        return (current, latest)
     }
 
     private func currentVersion(for provider: ProviderKind, executablePath: String?) -> String? {
@@ -184,21 +207,42 @@ struct VersionRefreshService: Sendable {
     }
 
     private func latestGitHubReleaseVersion(repository: String) -> String? {
-        guard let data = runJSONCommand([
+        if let data = runJSONCommand([
             "/usr/bin/curl",
             "-fsSL",
             "https://api.github.com/repos/\(repository)/releases/latest"
         ]),
-        let payload = try? JSONDecoder().decode(GitHubReleasePayload.self, from: data) else {
+        let payload = try? JSONDecoder().decode(GitHubReleasePayload.self, from: data) {
+            if let name = payload.name,
+               let version = VersionParsing.extractFirstVersion(from: name) {
+                return version
+            }
+
+            return VersionParsing.extractFirstVersion(from: payload.tagName)
+        }
+
+        let releasesPage = "https://github.com/\(repository)/releases/latest"
+        if let html = runTextCommand([
+            "/usr/bin/curl",
+            "-fsSL",
+            releasesPage
+        ]) {
+            if let titleVersion = VersionParsing.extractReleasePageVersion(from: html) {
+                return titleVersion
+            }
+        }
+
+        guard let headerText = runTextCommand([
+            "/usr/bin/curl",
+            "-fsSLI",
+            releasesPage
+        ]),
+        let location = VersionParsing.extractRedirectLocation(from: headerText),
+        let redirectedVersion = VersionParsing.extractFirstVersion(from: location) else {
             return nil
         }
 
-        if let name = payload.name,
-           let version = VersionParsing.extractFirstVersion(from: name) {
-            return version
-        }
-
-        return VersionParsing.extractFirstVersion(from: payload.tagName)
+        return redirectedVersion
     }
 
     private func resolveExecutablePath(for provider: ProviderKind) -> (commandPath: String?, resolvedPath: String?) {
@@ -477,6 +521,35 @@ enum VersionParsing {
 
         return String(text[startRange.upperBound..<endRange.lowerBound])
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func extractReleasePageVersion(from text: String) -> String? {
+        let patterns = [
+            #"<title>\s*Release\s+[^<]*?v(\d+(?:\.\d+)+(?:[-+][A-Za-z0-9._-]+)?)"#,
+            #"<title>\s*[^<]*?v(\d+(?:\.\d+)+(?:[-+][A-Za-z0-9._-]+)?)"#
+        ]
+
+        for pattern in patterns {
+            if let range = text.range(of: pattern, options: .regularExpression) {
+                let match = String(text[range])
+                if let version = extractFirstVersion(from: match) {
+                    return version
+                }
+            }
+        }
+
+        return nil
+    }
+
+    static func extractRedirectLocation(from text: String) -> String? {
+        for line in text.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.lowercased().hasPrefix("location:") {
+                return trimmed.dropFirst("location:".count).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+
+        return nil
     }
 
     static func detectInstallSource(executablePath: String?, provider: ProviderKind) -> InstallSource {

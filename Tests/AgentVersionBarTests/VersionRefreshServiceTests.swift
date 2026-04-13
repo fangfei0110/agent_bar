@@ -312,6 +312,61 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.checkedAt, Date(timeIntervalSince1970: 250))
     }
 
+    func testRefreshFallsBackToGitHubReleasePageForHermesWhenApiIsRateLimited() {
+        let service = VersionRefreshService(
+            commandRunner: { command in
+                if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'hermes'") == true {
+                    return CommandOutput(exitCode: 1, stdout: "", stderr: "")
+                }
+
+                if command == ["/usr/bin/which", "hermes"] {
+                    return CommandOutput(
+                        exitCode: 0,
+                        stdout: "/Users/test/.hermes/hermes-agent/venv/bin/hermes\n",
+                        stderr: ""
+                    )
+                }
+
+                if command == ["/Users/test/.hermes/hermes-agent/venv/bin/hermes", "--version"] {
+                    return CommandOutput(
+                        exitCode: 0,
+                        stdout: "Hermes Agent v0.8.0 (2026.4.8)\nUp to date\n",
+                        stderr: ""
+                    )
+                }
+
+                if command == [
+                    "/usr/bin/curl",
+                    "-fsSL",
+                    "https://api.github.com/repos/NousResearch/hermes-agent/releases/latest"
+                ] {
+                    return CommandOutput(exitCode: 56, stdout: "", stderr: "403")
+                }
+
+                if command == [
+                    "/usr/bin/curl",
+                    "-fsSL",
+                    "https://github.com/NousResearch/hermes-agent/releases/latest"
+                ] {
+                    return CommandOutput(
+                        exitCode: 0,
+                        stdout: "<html><head><title>Release Hermes Agent v0.8.0 (v2026.4.8) · NousResearch/hermes-agent</title></head></html>",
+                        stderr: ""
+                    )
+                }
+
+                return CommandOutput(exitCode: 1, stdout: "", stderr: "unexpected")
+            },
+            dateProvider: { Date(timeIntervalSince1970: 251) }
+        )
+
+        let snapshot = service.refresh(provider: .hermes)
+
+        XCTAssertEqual(snapshot.currentVersion, "0.8.0")
+        XCTAssertEqual(snapshot.latestVersion, "0.8.0")
+        XCTAssertEqual(snapshot.status, .upToDate)
+    }
+
     func testRefreshUsesPackageManagerUpdateCommandForPaperclip() {
         let service = VersionRefreshService(
             commandRunner: { command in

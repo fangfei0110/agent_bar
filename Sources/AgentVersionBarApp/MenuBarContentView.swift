@@ -9,13 +9,13 @@ struct MenuBarContentView: View {
     private var theme: ThemePalette { model.themePalette }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             header
 
             if model.visibleSnapshots.isEmpty {
                 emptyState
             } else {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
                     ForEach(model.visibleSnapshots) { snapshot in
                         let canOpenChangelog = snapshot.canOpenChangelog || changelogModel.hasCachedContent(for: snapshot.provider)
                         ProviderCard(
@@ -31,15 +31,15 @@ struct MenuBarContentView: View {
 
             actionBar
         }
-        .padding(12)
+        .padding(10)
         .frame(width: 424)
         .dashboardPanelBackground(theme: theme)
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 10) {
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("Agent Bar")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(theme.strongText)
@@ -61,7 +61,7 @@ struct MenuBarContentView: View {
                 )
             }
 
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 TimelineView(.periodic(from: .now, by: 30)) { context in
                     DashboardPill(
                         title: "Checked \(model.checkedAtTitle(relativeTo: context.date))",
@@ -102,7 +102,7 @@ struct MenuBarContentView: View {
     }
 
     private var actionBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             PanelActionButton(
                 title: model.isRefreshing ? "Refreshing..." : "Refresh",
                 systemImage: "arrow.clockwise",
@@ -187,21 +187,21 @@ private struct ProviderCard: View {
     let openChangelog: (ProviderVersionSnapshot) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 if snapshot.status.showsLeadingPanelStatusIcon {
                     ZStack {
                         Circle()
                             .fill(snapshot.status.dashboardAccent.softFill)
-                            .frame(width: 34, height: 34)
+                            .frame(width: 28, height: 28)
 
                         Image(systemName: snapshot.status.dashboardSymbol)
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(snapshot.status.dashboardAccent.color)
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(snapshot.provider.displayName)
                         .font(.headline.weight(.semibold))
                         .foregroundStyle(theme.strongText)
@@ -221,7 +221,7 @@ private struct ProviderCard: View {
                 )
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: 6) {
                 MetricBlock(
                     title: "Installed",
                     value: snapshot.currentTitle,
@@ -238,7 +238,7 @@ private struct ProviderCard: View {
                 )
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: 6) {
                 if canOpenChangelog {
                     PanelActionButton(
                         title: "Changelog",
@@ -279,11 +279,11 @@ private struct ProviderCard: View {
                 Spacer(minLength: 0)
             }
         }
-        .dashboardCard(theme: theme, accent: snapshot.status.dashboardAccent, padding: 12)
+        .dashboardCard(theme: theme, accent: snapshot.status.dashboardAccent, padding: 6)
     }
 
     private var isUpdateEnabled: Bool {
-        snapshot.status == .updateAvailable && snapshot.terminalUpdateCommand != nil
+        snapshot.terminalUpdateCommand != nil && (snapshot.status == .updateAvailable || snapshot.status == .currentOnly)
     }
 }
 
@@ -300,18 +300,27 @@ private struct MetricBlock: View {
     let theme: ThemePalette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 3) {
             Text(title.uppercased())
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .tracking(0.8)
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .tracking(0.7)
                 .foregroundStyle(theme.tertiaryText)
 
             Text(value)
-                .font(.system(size: 12, weight: valueWeight, design: .monospaced))
+                .font(.system(size: 10, weight: valueWeight, design: .monospaced))
                 .foregroundStyle(valueColor)
                 .lineLimit(1)
         }
-        .dashboardMetricTile(theme: theme)
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(theme.metricTileFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(theme.metricTileStroke, lineWidth: 1)
+        )
     }
 
     private var valueWeight: Font.Weight {
@@ -335,11 +344,11 @@ private struct DashboardPill: View {
 
     var body: some View {
         Label(title, systemImage: systemImage)
-            .font(.caption.weight(.semibold))
+            .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(accent.color)
             .lineLimit(1)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
             .background(
                 Capsule(style: .continuous)
                     .fill(accent.softFill)
@@ -367,10 +376,10 @@ private struct PanelActionButton: View {
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .font(.caption.weight(.semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(foregroundColor)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 7)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
                 .background(background)
                 .overlay(border)
         }

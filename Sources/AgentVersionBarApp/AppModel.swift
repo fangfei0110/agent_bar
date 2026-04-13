@@ -116,7 +116,7 @@ final class AppModel: ObservableObject {
         }
 
         guard let snapshot = snapshots.first(where: { $0.provider == provider }),
-              snapshot.status == .updateAvailable,
+              (snapshot.status == .updateAvailable || snapshot.status == .currentOnly),
               let command = snapshot.terminalUpdateCommand else {
             return
         }

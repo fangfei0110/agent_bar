@@ -250,7 +250,7 @@ struct DashboardCardStyle: ViewModifier {
             .background(cardBackground)
             .overlay(cardOverlay)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: theme.shadow, radius: 16, x: 0, y: 8)
+            .shadow(color: theme.shadow.opacity(0.75), radius: 10, x: 0, y: 4)
     }
 
     private var cardBackground: some View {
