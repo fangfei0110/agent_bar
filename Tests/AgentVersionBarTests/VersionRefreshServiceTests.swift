@@ -32,6 +32,18 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(payload, "/opt/homebrew/bin/codex")
     }
 
+    func testExtractCommitsBehindTitle() {
+        XCTAssertEqual(
+            VersionParsing.extractCommitsBehindTitle(from: "Update available: 5 commits behind — run 'hermes update'"),
+            "5 commits behind"
+        )
+        XCTAssertEqual(
+            VersionParsing.extractCommitsBehindTitle(from: "Update available: 1 commit behind"),
+            "1 commit behind"
+        )
+        XCTAssertNil(VersionParsing.extractCommitsBehindTitle(from: "Up to date"))
+    }
+
     func testDetectInstallSourceUnderstandsPackageManagers() {
         XCTAssertEqual(
             VersionParsing.detectInstallSource(
@@ -199,7 +211,19 @@ final class VersionRefreshServiceTests: XCTestCase {
                     return CommandOutput(exitCode: 0, stdout: "codex-cli 0.116.0\n", stderr: "")
                 }
 
-                if command == ["npm", "view", "@openai/codex", "version"] {
+                if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'npm'") == true {
+                    return CommandOutput(
+                        exitCode: 0,
+                        stdout: """
+                        __AGENT_VERSION_BAR_START__
+                        /opt/homebrew/bin/npm
+                        __AGENT_VERSION_BAR_END__
+                        """,
+                        stderr: ""
+                    )
+                }
+
+                if command == ["/opt/homebrew/bin/npm", "view", "@openai/codex", "version"] {
                     return CommandOutput(exitCode: 0, stdout: "0.117.0\n", stderr: "")
                 }
 
@@ -242,7 +266,19 @@ final class VersionRefreshServiceTests: XCTestCase {
                     return CommandOutput(exitCode: 0, stdout: "codex-cli 0.120.0\n", stderr: "")
                 }
 
-                if command == ["npm", "view", "@openai/codex", "version"] {
+                if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'npm'") == true {
+                    return CommandOutput(
+                        exitCode: 0,
+                        stdout: """
+                        __AGENT_VERSION_BAR_START__
+                        /opt/homebrew/bin/npm
+                        __AGENT_VERSION_BAR_END__
+                        """,
+                        stderr: ""
+                    )
+                }
+
+                if command == ["/opt/homebrew/bin/npm", "view", "@openai/codex", "version"] {
                     return CommandOutput(exitCode: 0, stdout: "0.120.0\n", stderr: "")
                 }
 
@@ -367,6 +403,44 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.status, .upToDate)
     }
 
+    func testRefreshUsesHermesCommitLagWhenVersionOutputReportsUpdate() {
+        let service = VersionRefreshService(
+            commandRunner: { command in
+                if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'hermes'") == true {
+                    return CommandOutput(exitCode: 1, stdout: "", stderr: "")
+                }
+
+                if command == ["/usr/bin/which", "hermes"] {
+                    return CommandOutput(
+                        exitCode: 0,
+                        stdout: "/Users/test/.hermes/hermes-agent/venv/bin/hermes\n",
+                        stderr: ""
+                    )
+                }
+
+                if command == ["/Users/test/.hermes/hermes-agent/venv/bin/hermes", "--version"] {
+                    return CommandOutput(
+                        exitCode: 0,
+                        stdout: """
+                        Hermes Agent v0.11.0 (2026.4.23)
+                        Update available: 5 commits behind — run 'hermes update'
+                        """,
+                        stderr: ""
+                    )
+                }
+
+                return CommandOutput(exitCode: 1, stdout: "", stderr: "unexpected")
+            },
+            dateProvider: { Date(timeIntervalSince1970: 251) }
+        )
+
+        let snapshot = service.refresh(provider: .hermes)
+
+        XCTAssertEqual(snapshot.currentVersion, "0.11.0")
+        XCTAssertEqual(snapshot.latestVersion, "5 commits behind")
+        XCTAssertEqual(snapshot.status, .updateAvailable)
+    }
+
     func testRefreshUsesPackageManagerUpdateCommandForPaperclip() {
         let service = VersionRefreshService(
             commandRunner: { command in
@@ -386,7 +460,19 @@ final class VersionRefreshServiceTests: XCTestCase {
                     return CommandOutput(exitCode: 0, stdout: "paperclipai 2026.402.0\n", stderr: "")
                 }
 
-                if command == ["npm", "view", "paperclipai", "version"] {
+                if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'npm'") == true {
+                    return CommandOutput(
+                        exitCode: 0,
+                        stdout: """
+                        __AGENT_VERSION_BAR_START__
+                        /opt/homebrew/bin/npm
+                        __AGENT_VERSION_BAR_END__
+                        """,
+                        stderr: ""
+                    )
+                }
+
+                if command == ["/opt/homebrew/bin/npm", "view", "paperclipai", "version"] {
                     return CommandOutput(exitCode: 0, stdout: "2026.403.0\n", stderr: "")
                 }
 
@@ -486,6 +572,28 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.status, .upToDate)
         XCTAssertEqual(snapshot.latestTitle, "0 commits behind")
         XCTAssertFalse(snapshot.canOpenChangelog)
+    }
+
+    func testSnapshotDoesNotOfferUpdateWhenInstalledVersionIsNewerThanAvailableVersion() {
+        let snapshot = ProviderVersionSnapshot(
+            provider: .claudeCode,
+            currentVersion: "2.1.119",
+            latestVersion: "2.1.112",
+            executablePath: "/usr/local/bin/claude",
+            resolvedExecutablePath: "/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js",
+            configPath: "\(NSHomeDirectory())/.claude/settings.json",
+            installSource: .npm,
+            installMethodTitle: "npm global package (@anthropic-ai/claude-code)",
+            updateMethodTitle: "npm install -g @anthropic-ai/claude-code@latest",
+            terminalUpdateCommand: ["npm", "install", "-g", "@anthropic-ai/claude-code@latest"],
+            isInstalled: true,
+            checkedAt: Date(timeIntervalSince1970: 282),
+            errorDescription: nil
+        )
+
+        XCTAssertEqual(snapshot.status, .upToDate)
+        XCTAssertEqual(snapshot.latestTitle, "2.1.119")
+        XCTAssertFalse(snapshot.isChangelogAvailable)
     }
 
     func testProvidersExposeOfficialChangelogURLs() {

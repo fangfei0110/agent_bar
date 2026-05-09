@@ -141,6 +141,12 @@ struct VersionRefreshService: Sendable {
     }
 
     private func latestVersion(for provider: ProviderKind, installSource: InstallSource, executablePath: String?) -> String? {
+        if provider == .hermes,
+           let versionOutput = executablePath.flatMap({ runTextCommand([$0, "--version"]) }),
+           let commitsBehindTitle = VersionParsing.extractCommitsBehindTitle(from: versionOutput) {
+            return commitsBehindTitle
+        }
+
         if installSource == .sourceCheckout {
             return sourceCheckoutBehindTitle(executablePath: executablePath)
         }
@@ -193,13 +199,18 @@ struct VersionRefreshService: Sendable {
         switch source {
         case .homebrew:
             guard let brewPackage = provider.brewPackage,
-                  let data = runJSONCommand(["brew", "info", "--json=v2", brewPackage]) else {
+                  let brewPath = resolveToolPath(named: "brew"),
+                  let data = runJSONCommand([brewPath, "info", "--json=v2", brewPackage]) else {
                 return nil
             }
 
             return VersionParsing.latestVersionFromBrewInfo(data: data)
         case .npm, .pnpm:
-            return runTextCommand(["npm", "view", provider.npmPackage, "version"])
+            guard let npmPath = resolveToolPath(named: "npm") else {
+                return nil
+            }
+
+            return runTextCommand([npmPath, "view", provider.npmPackage, "version"])
                 .flatMap(VersionParsing.extractFirstVersion(from:))
         case .sourceCheckout, .nativeInstaller, .directBinary, .unknown:
             return nil
@@ -280,6 +291,10 @@ struct VersionRefreshService: Sendable {
     }
 
     private func interactiveShellExecutablePath(for executable: String) -> String? {
+        resolveToolPath(named: executable)
+    }
+
+    private func resolveToolPath(named executable: String) -> String? {
         let startMarker = "__AGENT_VERSION_BAR_START__"
         let endMarker = "__AGENT_VERSION_BAR_END__"
         let script = """
@@ -552,6 +567,23 @@ enum VersionParsing {
         return nil
     }
 
+    static func extractCommitsBehindTitle(from text: String) -> String? {
+        guard let match = text.range(of: #"\d+\s+commits?\s+behind"#, options: [.regularExpression, .caseInsensitive]) else {
+            return nil
+        }
+
+        return String(text[match])
+    }
+
+    static func compareVersions(_ lhs: String, _ rhs: String) -> ComparisonResult? {
+        guard let lhsVersion = ParsedVersion(lhs),
+              let rhsVersion = ParsedVersion(rhs) else {
+            return nil
+        }
+
+        return lhsVersion.compare(to: rhsVersion)
+    }
+
     static func detectInstallSource(executablePath: String?, provider: ProviderKind) -> InstallSource {
         guard let executablePath else {
             return .unknown
@@ -589,6 +621,93 @@ enum VersionParsing {
         }
 
         return payload.formulae.first?.versions.stable ?? payload.casks.first?.version
+    }
+
+    private struct ParsedVersion {
+        let numbers: [Int]
+        let prerelease: [String]?
+
+        init?(_ text: String) {
+            guard let match = text.range(
+                of: #"\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?"#,
+                options: .regularExpression
+            ) else {
+                return nil
+            }
+
+            let rawVersion = String(text[match])
+            let versionParts = rawVersion.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+            let numberParts = versionParts[0].split(separator: ".", omittingEmptySubsequences: false)
+            let parsedNumbers = numberParts.compactMap { Int($0) }
+            guard parsedNumbers.count == numberParts.count else {
+                return nil
+            }
+
+            numbers = parsedNumbers
+            if versionParts.count == 2, versionParts[1].isEmpty == false {
+                prerelease = versionParts[1].split(separator: ".").map(String.init)
+            } else {
+                prerelease = nil
+            }
+        }
+
+        func compare(to other: ParsedVersion) -> ComparisonResult {
+            let componentCount = max(numbers.count, other.numbers.count)
+            for index in 0..<componentCount {
+                let lhs = index < numbers.count ? numbers[index] : 0
+                let rhs = index < other.numbers.count ? other.numbers[index] : 0
+                if lhs < rhs {
+                    return .orderedAscending
+                }
+                if lhs > rhs {
+                    return .orderedDescending
+                }
+            }
+
+            return comparePrerelease(to: other)
+        }
+
+        private func comparePrerelease(to other: ParsedVersion) -> ComparisonResult {
+            switch (prerelease, other.prerelease) {
+            case (nil, nil):
+                return .orderedSame
+            case (nil, .some):
+                return .orderedDescending
+            case (.some, nil):
+                return .orderedAscending
+            case let (lhs?, rhs?):
+                let componentCount = max(lhs.count, rhs.count)
+                for index in 0..<componentCount {
+                    guard index < lhs.count else {
+                        return .orderedAscending
+                    }
+                    guard index < rhs.count else {
+                        return .orderedDescending
+                    }
+
+                    let lhsPart = lhs[index]
+                    let rhsPart = rhs[index]
+                    if lhsPart == rhsPart {
+                        continue
+                    }
+
+                    let lhsNumber = Int(lhsPart)
+                    let rhsNumber = Int(rhsPart)
+                    switch (lhsNumber, rhsNumber) {
+                    case let (lhsNumber?, rhsNumber?):
+                        return lhsNumber < rhsNumber ? .orderedAscending : .orderedDescending
+                    case (.some, nil):
+                        return .orderedAscending
+                    case (nil, .some):
+                        return .orderedDescending
+                    case (nil, nil):
+                        return lhsPart.localizedStandardCompare(rhsPart)
+                    }
+                }
+
+                return .orderedSame
+            }
+        }
     }
 }
 

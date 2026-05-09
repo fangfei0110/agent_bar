@@ -305,13 +305,21 @@ struct ProviderVersionSnapshot: Identifiable, Equatable, Sendable {
     var id: String { provider.id }
 
     var status: VersionStatus {
-        if let commitsBehind = sourceCheckoutCommitsBehind {
+        if let commitsBehind = commitsBehind {
             return commitsBehind == 0 ? .upToDate : .updateAvailable
         }
 
         switch (currentVersion, latestVersion) {
         case let (current?, latest?):
-            return current == latest ? .upToDate : .updateAvailable
+            if current == latest {
+                return .upToDate
+            }
+
+            if let comparison = VersionParsing.compareVersions(current, latest) {
+                return comparison == .orderedAscending ? .updateAvailable : .upToDate
+            }
+
+            return .updateAvailable
         case (.some, nil):
             return .currentOnly
         case (nil, .some):
@@ -326,12 +334,30 @@ struct ProviderVersionSnapshot: Identifiable, Equatable, Sendable {
     }
 
     var latestTitle: String {
-        latestVersion ?? "Unavailable"
+        effectiveLatestVersion ?? "Unavailable"
     }
 
-    var sourceCheckoutCommitsBehind: Int? {
-        guard installSource == .sourceCheckout,
-              let latestVersion,
+    var effectiveLatestVersion: String? {
+        guard let latestVersion else {
+            return nil
+        }
+
+        guard commitsBehind == nil else {
+            return latestVersion
+        }
+
+        guard let currentVersion,
+              let comparison = VersionParsing.compareVersions(currentVersion, latestVersion),
+              comparison == .orderedDescending else {
+            return latestVersion
+        }
+
+        return currentVersion
+    }
+
+    var commitsBehind: Int? {
+        guard let latestVersion,
+              VersionParsing.extractCommitsBehindTitle(from: latestVersion) != nil,
               let match = latestVersion.range(of: #"\d+"#, options: .regularExpression) else {
             return nil
         }
@@ -360,7 +386,7 @@ struct ProviderVersionSnapshot: Identifiable, Equatable, Sendable {
     }
 
     var canOpenChangelog: Bool {
-        currentVersion != nil && latestVersion != nil && changelogSourceURL != nil && installSource != .sourceCheckout
+        currentVersion != nil && effectiveLatestVersion != nil && changelogSourceURL != nil && installSource != .sourceCheckout
     }
 
     static func placeholder(for provider: ProviderKind) -> ProviderVersionSnapshot {

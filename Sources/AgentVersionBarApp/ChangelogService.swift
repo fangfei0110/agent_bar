@@ -28,7 +28,7 @@ struct ChangelogRequest: Equatable, Hashable, Sendable {
         self.init(
             provider: snapshot.provider,
             currentVersion: snapshot.currentVersion,
-            latestVersion: snapshot.latestVersion,
+            latestVersion: snapshot.effectiveLatestVersion,
             sourceURL: snapshot.changelogSourceURL
         )
     }
