@@ -443,6 +443,7 @@ struct VersionRefreshService: Sendable {
         }
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
+        process.environment = commandEnvironment()
 
         do {
             try process.run()
@@ -456,6 +457,35 @@ struct VersionRefreshService: Sendable {
             stdout: String(decoding: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
             stderr: String(decoding: stderrPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         )
+    }
+
+    static func commandEnvironment(base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        var environment = base
+        let home = environment["HOME"] ?? NSHomeDirectory()
+        let preferredPaths = [
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "/usr/local/sbin",
+            "\(home)/.local/bin",
+            "\(home)/.npm-packages/bin",
+            "\(home)/Library/pnpm",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin"
+        ]
+
+        let existingPaths = (environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
+        var mergedPaths: [String] = []
+        for path in preferredPaths + existingPaths where mergedPaths.contains(path) == false {
+            mergedPaths.append(path)
+        }
+
+        environment["PATH"] = mergedPaths.joined(separator: ":")
+        return environment
     }
 
     static func launchCommandInTerminal(_ command: [String], workingDirectory: String = NSHomeDirectory()) {

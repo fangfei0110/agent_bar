@@ -44,6 +44,23 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertNil(VersionParsing.extractCommitsBehindTitle(from: "Up to date"))
     }
 
+    func testCommandEnvironmentAddsHomebrewPathsForGuiLaunches() {
+        let environment = VersionRefreshService.commandEnvironment(base: [
+            "HOME": "/Users/test",
+            "PATH": "/usr/bin:/bin"
+        ])
+        let paths = environment["PATH"]?.split(separator: ":").map(String.init)
+
+        XCTAssertEqual(paths?.prefix(4), [
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "/usr/local/sbin"
+        ])
+        XCTAssertTrue(paths?.contains("/Users/test/.local/bin") == true)
+        XCTAssertEqual(paths?.filter { $0 == "/usr/bin" }.count, 1)
+    }
+
     func testDetectInstallSourceUnderstandsPackageManagers() {
         XCTAssertEqual(
             VersionParsing.detectInstallSource(
