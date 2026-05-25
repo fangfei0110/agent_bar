@@ -1,10 +1,12 @@
 import Foundation
-import XCTest
+import Testing
 
 @testable import AgentVersionBarApp
 
-final class VersionRefreshServiceTests: XCTestCase {
-    func testExtractJSONPayloadIgnoresNoise() {
+@Suite("VersionRefreshServiceTests")
+struct VersionRefreshServiceTests {
+    @Test
+    func extractJSONPayloadIgnoresNoise() {
         let payload = VersionParsing.extractJSONPayload(from: """
         booting
         {"version":{"current":"1.2.0","latest":"1.3.0"}}
@@ -14,7 +16,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(payload, #"{"version":{"current":"1.2.0","latest":"1.3.0"}}"#)
     }
 
-    func testExtractMarkedSectionIgnoresShellNoise() {
+    @Test
+    func extractMarkedSectionIgnoresShellNoise() {
         let text = """
         startup noise
         __AGENT_VERSION_BAR_START__
@@ -32,7 +35,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(payload, "/opt/homebrew/bin/codex")
     }
 
-    func testExtractCommitsBehindTitle() {
+    @Test
+    func extractCommitsBehindTitle() {
         XCTAssertEqual(
             VersionParsing.extractCommitsBehindTitle(from: "Update available: 5 commits behind — run 'hermes update'"),
             "5 commits behind"
@@ -44,7 +48,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertNil(VersionParsing.extractCommitsBehindTitle(from: "Up to date"))
     }
 
-    func testCommandEnvironmentAddsHomebrewPathsForGuiLaunches() {
+    @Test
+    func commandEnvironmentAddsHomebrewPathsForGuiLaunches() {
         let environment = VersionRefreshService.commandEnvironment(base: [
             "HOME": "/Users/test",
             "PATH": "/usr/bin:/bin"
@@ -61,7 +66,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(paths?.filter { $0 == "/usr/bin" }.count, 1)
     }
 
-    func testDetectInstallSourceUnderstandsPackageManagers() {
+    @Test
+    func detectInstallSourceUnderstandsPackageManagers() {
         XCTAssertEqual(
             VersionParsing.detectInstallSource(
                 executablePath: "/opt/homebrew/Cellar/opencode/0.9.0/bin/opencode",
@@ -113,7 +119,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         )
     }
 
-    func testLatestVersionFromBrewInfoSupportsFormulaeAndCasks() {
+    @Test
+    func latestVersionFromBrewInfoSupportsFormulaeAndCasks() {
         let formulaData = Data("""
         {"formulae":[{"versions":{"stable":"0.9.2"}}],"casks":[]}
         """.utf8)
@@ -125,7 +132,44 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(VersionParsing.latestVersionFromBrewInfo(data: caskData), "1.0.16")
     }
 
-    func testRefreshUsesOpenClawStatusPayloadBeforeVersionCommand() {
+    @Test
+    func commandEnvironmentAddsNvmDefaultBinForEnvCommands() throws {
+        let fileManager = FileManager.default
+        let homeURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let aliasURL = homeURL.appendingPathComponent(".nvm/alias", isDirectory: true)
+        let binURL = homeURL.appendingPathComponent(".nvm/versions/node/v24.14.0/bin", isDirectory: true)
+
+        try fileManager.createDirectory(at: aliasURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: binURL, withIntermediateDirectories: true)
+        try "v24.14.0\n".write(to: aliasURL.appendingPathComponent("default"), atomically: true, encoding: .utf8)
+        defer { try? fileManager.removeItem(at: homeURL) }
+
+        let environment = VersionRefreshService.processEnvironment(
+            for: ["npm", "view", "@openai/codex", "version"],
+            baseEnvironment: ["PATH": "/usr/bin"],
+            homeDirectory: homeURL.path,
+            fileManager: fileManager
+        )
+
+        let pathEntries = environment["PATH"]?.split(separator: ":").map(String.init) ?? []
+        XCTAssertEqual(pathEntries.first, binURL.path)
+        XCTAssertTrue(pathEntries.contains("/usr/bin"))
+    }
+
+    @Test
+    func hermesVersionCommandGetsLongerTimeout() {
+        XCTAssertEqual(
+            VersionRefreshService.commandTimeout(for: ["/Users/test/.local/bin/hermes", "--version"]),
+            6
+        )
+        XCTAssertEqual(
+            VersionRefreshService.commandTimeout(for: ["npm", "view", "@openai/codex", "version"]),
+            4
+        )
+    }
+
+    @Test
+    func refreshUsesOpenClawStatusPayloadBeforeVersionCommand() {
         let service = VersionRefreshService(
             commandRunner: { command in
                 if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'openclaw'") == true {
@@ -164,7 +208,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.checkedAt, Date(timeIntervalSince1970: 100))
     }
 
-    func testResolveWorkspacePathFindsRepoRootFromExecutablePath() throws {
+    @Test
+    func resolveWorkspacePathFindsRepoRootFromExecutablePath() throws {
         let fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -188,7 +233,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(workspacePath, rootURL.path)
     }
 
-    func testResolveWorkspacePathFallsBackToCurrentDirectory() throws {
+    @Test
+    func resolveWorkspacePathFallsBackToCurrentDirectory() throws {
         let fileManager = FileManager.default
         let currentDirectoryURL = fileManager.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -209,7 +255,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(workspacePath, currentDirectoryURL.path)
     }
 
-    func testRefreshUsesPackageManagerUpdateCommandForCodexCLI() {
+    @Test
+    func refreshUsesPackageManagerUpdateCommandForCodexCLI() {
         let service = VersionRefreshService(
             commandRunner: { command in
                 if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'codex'") == true {
@@ -261,7 +308,24 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.checkedAt, Date(timeIntervalSince1970: 200))
     }
 
-    func testRefreshPrefersInteractiveShellPathForCodexCLI() {
+    @Test
+    func refreshPrefersInteractiveShellPathForCodexCLI() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let targetURL = rootURL
+            .appendingPathComponent("lib/node_modules/@openai/codex/bin", isDirectory: true)
+            .appendingPathComponent("codex.js")
+        let symlinkURL = rootURL
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("codex")
+
+        try fileManager.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: symlinkURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "#!/usr/bin/env node\n".write(to: targetURL, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: targetURL.path)
+        try fileManager.createSymbolicLink(at: symlinkURL, withDestinationURL: targetURL)
+        defer { try? fileManager.removeItem(at: rootURL) }
+
         let service = VersionRefreshService(
             commandRunner: { command in
                 if command.first == "/bin/zsh",
@@ -272,14 +336,14 @@ final class VersionRefreshServiceTests: XCTestCase {
                         stdout: """
                         shell startup noise
                         __AGENT_VERSION_BAR_START__
-                        /opt/homebrew/bin/codex
+                        \(symlinkURL.path)
                         __AGENT_VERSION_BAR_END__
                         """,
                         stderr: ""
                     )
                 }
 
-                if command == ["/opt/homebrew/bin/codex", "--version"] {
+                if command == [symlinkURL.path, "--version"] {
                     return CommandOutput(exitCode: 0, stdout: "codex-cli 0.120.0\n", stderr: "")
                 }
 
@@ -306,14 +370,15 @@ final class VersionRefreshServiceTests: XCTestCase {
 
         let snapshot = service.refresh(provider: .codexCli)
 
-        XCTAssertEqual(snapshot.executablePath, "/opt/homebrew/bin/codex")
-        XCTAssertEqual(snapshot.resolvedExecutablePath, "/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js")
+        XCTAssertEqual(snapshot.executablePath, symlinkURL.path)
+        XCTAssertEqual(snapshot.resolvedExecutablePath, targetURL.path)
         XCTAssertEqual(snapshot.currentVersion, "0.120.0")
         XCTAssertEqual(snapshot.latestVersion, "0.120.0")
         XCTAssertEqual(snapshot.status, .upToDate)
     }
 
-    func testRefreshUsesGitHubReleaseForHermes() {
+    @Test
+    func refreshUsesGitHubReleaseForHermes() {
         let service = VersionRefreshService(
             commandRunner: { command in
                 if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'hermes'") == true {
@@ -365,7 +430,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.checkedAt, Date(timeIntervalSince1970: 250))
     }
 
-    func testRefreshFallsBackToGitHubReleasePageForHermesWhenApiIsRateLimited() {
+    @Test
+    func refreshFallsBackToGitHubReleasePageForHermesWhenApiIsRateLimited() {
         let service = VersionRefreshService(
             commandRunner: { command in
                 if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'hermes'") == true {
@@ -420,7 +486,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.status, .upToDate)
     }
 
-    func testRefreshUsesHermesCommitLagWhenVersionOutputReportsUpdate() {
+    @Test
+    func refreshUsesHermesCommitLagWhenVersionOutputReportsUpdate() {
         let service = VersionRefreshService(
             commandRunner: { command in
                 if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'hermes'") == true {
@@ -458,7 +525,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.status, .updateAvailable)
     }
 
-    func testRefreshUsesPackageManagerUpdateCommandForPaperclip() {
+    @Test
+    func refreshUsesPackageManagerUpdateCommandForPaperclip() {
         let service = VersionRefreshService(
             commandRunner: { command in
                 if command.first == "/bin/zsh", command.dropFirst().first == "-lic", command.last?.contains("whence -p 'paperclipai'") == true {
@@ -510,7 +578,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.checkedAt, Date(timeIntervalSince1970: 275))
     }
 
-    func testRefreshUsesSourceCheckoutForPaperclipWhenCliIsNotOnPath() throws {
+    @Test
+    func refreshUsesSourceCheckoutForPaperclipWhenCliIsNotOnPath() throws {
         let fileManager = FileManager.default
         let originalHome = NSHomeDirectory()
         let homeURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -569,7 +638,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertNil(snapshot.terminalUpdateCommand)
     }
 
-    func testSourceCheckoutStatusUsesCommitLagInsteadOfVersionComparison() {
+    @Test
+    func sourceCheckoutStatusUsesCommitLagInsteadOfVersionComparison() {
         let snapshot = ProviderVersionSnapshot(
             provider: .paperclip,
             currentVersion: "0.3.1",
@@ -591,7 +661,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertFalse(snapshot.canOpenChangelog)
     }
 
-    func testSnapshotDoesNotOfferUpdateWhenInstalledVersionIsNewerThanAvailableVersion() {
+    @Test
+    func snapshotDoesNotOfferUpdateWhenInstalledVersionIsNewerThanAvailableVersion() {
         let snapshot = ProviderVersionSnapshot(
             provider: .claudeCode,
             currentVersion: "2.1.119",
@@ -613,7 +684,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertFalse(snapshot.isChangelogAvailable)
     }
 
-    func testProvidersExposeOfficialChangelogURLs() {
+    @Test
+    func providersExposeOfficialChangelogURLs() {
         XCTAssertEqual(ProviderKind.openClaw.officialChangelogURL?.absoluteString, "https://github.com/clawdbot/clawdbot/releases")
         XCTAssertEqual(ProviderKind.openCode.officialChangelogURL?.absoluteString, "https://opencode.ai/changelog")
         XCTAssertEqual(ProviderKind.claudeCode.officialChangelogURL?.absoluteString, "https://github.com/anthropics/claude-code/releases")
@@ -622,7 +694,8 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(ProviderKind.paperclip.officialChangelogURL?.absoluteString, "https://github.com/paperclipai/paperclip/releases")
     }
 
-    func testSnapshotCanOpenChangelogWhenVersionsAreKnown() {
+    @Test
+    func snapshotCanOpenChangelogWhenVersionsAreKnown() {
         let updateSnapshot = ProviderVersionSnapshot(
             provider: .codexCli,
             currentVersion: "0.116.0",
@@ -676,4 +749,23 @@ final class VersionRefreshServiceTests: XCTestCase {
         XCTAssertEqual(upToDateSnapshot.changelogSourceURL, ProviderKind.codexCli.officialChangelogURL)
         XCTAssertFalse(currentSnapshot.canOpenChangelog)
     }
+}
+
+private func XCTAssertEqual<T: Equatable>(
+    _ lhs: @autoclosure () -> T,
+    _ rhs: @autoclosure () -> T
+) {
+    #expect(lhs() == rhs())
+}
+
+private func XCTAssertTrue(_ condition: @autoclosure () -> Bool) {
+    #expect(condition())
+}
+
+private func XCTAssertFalse(_ condition: @autoclosure () -> Bool) {
+    #expect(condition() == false)
+}
+
+private func XCTAssertNil<T>(_ value: @autoclosure () -> T?) {
+    #expect(value() == nil)
 }

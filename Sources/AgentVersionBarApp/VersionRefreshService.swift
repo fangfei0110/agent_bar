@@ -441,16 +441,43 @@ struct VersionRefreshService: Sendable {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = command
         }
+        process.environment = processEnvironment(for: command)
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
-        process.environment = commandEnvironment()
 
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
             return CommandOutput(exitCode: 1, stdout: "", stderr: error.localizedDescription)
         }
+
+        let timeout = commandTimeout(for: command)
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+
+        if process.isRunning {
+            process.terminate()
+
+            let terminationDeadline = Date().addingTimeInterval(0.2)
+            while process.isRunning, Date() < terminationDeadline {
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+                process.waitUntilExit()
+            }
+
+            return CommandOutput(
+                exitCode: 124,
+                stdout: String(decoding: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
+                stderr: "Command timed out after \(Self.timeoutDisplayString(timeout)) seconds"
+            )
+        }
+
+        process.waitUntilExit()
 
         return CommandOutput(
             exitCode: process.terminationStatus,
@@ -460,32 +487,158 @@ struct VersionRefreshService: Sendable {
     }
 
     static func commandEnvironment(base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
-        var environment = base
-        let home = environment["HOME"] ?? NSHomeDirectory()
-        let preferredPaths = [
+        processEnvironment(for: [], baseEnvironment: base)
+    }
+
+    static func processEnvironment(
+        for command: [String],
+        baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: String = NSHomeDirectory(),
+        fileManager: FileManager = .default
+    ) -> [String: String] {
+        var environment = baseEnvironment
+        let resolvedHome = environment["HOME"] ?? homeDirectory
+        environment["HOME"] = resolvedHome
+
+        let nvmDirectory = environment["NVM_DIR"] ?? "\(resolvedHome)/.nvm"
+        if environment["NVM_DIR"] == nil, fileManager.fileExists(atPath: nvmDirectory) {
+            environment["NVM_DIR"] = nvmDirectory
+        }
+
+        let existingPathEntries = (environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
+        let leadingEntries = leadingPathEntries(
+            for: command,
+            homeDirectory: resolvedHome,
+            nvmDirectory: nvmDirectory,
+            fileManager: fileManager
+        )
+        let fallbackEntries = [
             "/opt/homebrew/bin",
             "/opt/homebrew/sbin",
             "/usr/local/bin",
             "/usr/local/sbin",
-            "\(home)/.local/bin",
-            "\(home)/.npm-packages/bin",
-            "\(home)/Library/pnpm",
+            "\(resolvedHome)/.local/bin",
+            "\(resolvedHome)/.npm-packages/bin",
+            "\(resolvedHome)/Library/pnpm",
             "/usr/bin",
             "/bin",
             "/usr/sbin",
             "/sbin"
         ]
 
-        let existingPaths = (environment["PATH"] ?? "")
-            .split(separator: ":")
-            .map(String.init)
-        var mergedPaths: [String] = []
-        for path in preferredPaths + existingPaths where mergedPaths.contains(path) == false {
-            mergedPaths.append(path)
+        environment["PATH"] = uniquePathEntries(
+            leadingEntries + fallbackEntries + existingPathEntries,
+            fileManager: fileManager
+        ).joined(separator: ":")
+        return environment
+    }
+
+    static func commandTimeout(for command: [String]) -> TimeInterval {
+        if let executable = command.first,
+           executable.hasSuffix("/hermes"),
+           command.dropFirst() == ["--version"] {
+            return 6
         }
 
-        environment["PATH"] = mergedPaths.joined(separator: ":")
-        return environment
+        if command.contains("npm"), command.contains("view") {
+            return 4
+        }
+
+        if command.contains("brew"), command.contains("info") {
+            return 4
+        }
+
+        if command.contains("/usr/bin/curl") {
+            return 4
+        }
+
+        if command.contains("/bin/zsh"), command.contains("-lic") {
+            return 2
+        }
+
+        return 3
+    }
+
+    private static func timeoutDisplayString(_ timeout: TimeInterval) -> String {
+        if timeout.rounded(.towardZero) == timeout {
+            return String(Int(timeout))
+        }
+
+        return String(timeout)
+    }
+
+    private static func leadingPathEntries(
+        for command: [String],
+        homeDirectory: String,
+        nvmDirectory: String,
+        fileManager: FileManager
+    ) -> [String] {
+        var entries: [String] = []
+
+        if let executable = command.first, executable.hasPrefix("/") {
+            entries.append(URL(fileURLWithPath: executable).deletingLastPathComponent().path)
+        }
+
+        if let defaultNvmBin = defaultNvmBinDirectory(nvmDirectory: nvmDirectory, fileManager: fileManager) {
+            entries.append(defaultNvmBin)
+        }
+
+        let nvmVersionsRoot = URL(fileURLWithPath: nvmDirectory)
+            .appendingPathComponent("versions/node", isDirectory: true)
+        if let installedVersions = try? fileManager.contentsOfDirectory(
+            at: nvmVersionsRoot,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) {
+            for versionDirectory in installedVersions.sorted(by: { $0.lastPathComponent > $1.lastPathComponent }) {
+                entries.append(versionDirectory.appendingPathComponent("bin", isDirectory: true).path)
+            }
+        }
+
+        return entries
+    }
+
+    private static func defaultNvmBinDirectory(
+        nvmDirectory: String,
+        fileManager: FileManager
+    ) -> String? {
+        let aliasPath = URL(fileURLWithPath: nvmDirectory)
+            .appendingPathComponent("alias/default", isDirectory: false)
+            .path
+        guard let alias = try? String(contentsOfFile: aliasPath, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              alias.isEmpty == false else {
+            return nil
+        }
+
+        let version = alias.hasPrefix("v") ? alias : "v\(alias)"
+        let binPath = URL(fileURLWithPath: nvmDirectory)
+            .appendingPathComponent("versions/node", isDirectory: true)
+            .appendingPathComponent(version, isDirectory: true)
+            .appendingPathComponent("bin", isDirectory: true)
+            .path
+        return fileManager.fileExists(atPath: binPath) ? binPath : nil
+    }
+
+    private static func uniquePathEntries(
+        _ entries: [String],
+        fileManager: FileManager
+    ) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+
+        for entry in entries where entry.isEmpty == false {
+            let normalized = URL(fileURLWithPath: entry).standardizedFileURL.path
+            guard seen.insert(normalized).inserted else {
+                continue
+            }
+
+            result.append(normalized)
+        }
+
+        return result
     }
 
     static func launchCommandInTerminal(_ command: [String], workingDirectory: String = NSHomeDirectory()) {
