@@ -309,6 +309,46 @@ struct VersionRefreshServiceTests {
     }
 
     @Test
+    func refreshUsesWhichForNpmLatestWhenInteractiveShellLookupFails() {
+        let service = VersionRefreshService(
+            commandRunner: { command in
+                if command.first == "/bin/zsh", command.dropFirst().first == "-lic" {
+                    return CommandOutput(exitCode: 124, stdout: "", stderr: "timed out")
+                }
+
+                if command == ["/usr/bin/which", "opencode"] {
+                    return CommandOutput(
+                        exitCode: 0,
+                        stdout: "/usr/local/lib/node_modules/opencode-ai/bin/opencode\n",
+                        stderr: ""
+                    )
+                }
+
+                if command == ["/usr/bin/which", "npm"] {
+                    return CommandOutput(exitCode: 0, stdout: "/opt/homebrew/bin/npm\n", stderr: "")
+                }
+
+                if command == ["/usr/local/lib/node_modules/opencode-ai/bin/opencode", "--version"] {
+                    return CommandOutput(exitCode: 0, stdout: "opencode 1.15.10\n", stderr: "")
+                }
+
+                if command == ["/opt/homebrew/bin/npm", "view", "opencode-ai", "version"] {
+                    return CommandOutput(exitCode: 0, stdout: "1.15.12\n", stderr: "")
+                }
+
+                return CommandOutput(exitCode: 1, stdout: "", stderr: "unexpected")
+            },
+            dateProvider: { Date(timeIntervalSince1970: 205) }
+        )
+
+        let snapshot = service.refresh(provider: .openCode)
+
+        XCTAssertEqual(snapshot.currentVersion, "1.15.10")
+        XCTAssertEqual(snapshot.latestVersion, "1.15.12")
+        XCTAssertEqual(snapshot.status, .updateAvailable)
+    }
+
+    @Test
     func refreshPrefersInteractiveShellPathForCodexCLI() throws {
         let fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

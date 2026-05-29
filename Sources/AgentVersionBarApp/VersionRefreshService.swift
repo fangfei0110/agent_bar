@@ -295,6 +295,14 @@ struct VersionRefreshService: Sendable {
     }
 
     private func resolveToolPath(named executable: String) -> String? {
+        let whichOutput = commandRunner(["/usr/bin/which", executable])
+        if whichOutput.exitCode == 0 {
+            let path = whichOutput.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            if path.isEmpty == false {
+                return path
+            }
+        }
+
         let startMarker = "__AGENT_VERSION_BAR_START__"
         let endMarker = "__AGENT_VERSION_BAR_END__"
         let script = """
