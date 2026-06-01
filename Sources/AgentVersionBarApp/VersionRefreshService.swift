@@ -550,11 +550,11 @@ struct VersionRefreshService: Sendable {
             return 6
         }
 
-        if command.contains("npm"), command.contains("view") {
-            return 4
+        if command.containsExecutable(named: "npm"), command.contains("view") {
+            return 15
         }
 
-        if command.contains("brew"), command.contains("info") {
+        if command.containsExecutable(named: "brew"), command.contains("info") {
             return 4
         }
 
@@ -697,6 +697,14 @@ struct VersionRefreshService: Sendable {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         return "\"\(escaped)\""
+    }
+}
+
+private extension Array where Element == String {
+    func containsExecutable(named name: String) -> Bool {
+        contains { element in
+            element == name || URL(fileURLWithPath: element).lastPathComponent == name
+        }
     }
 }
 

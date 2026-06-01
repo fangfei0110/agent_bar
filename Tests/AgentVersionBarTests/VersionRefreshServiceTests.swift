@@ -164,7 +164,11 @@ struct VersionRefreshServiceTests {
         )
         XCTAssertEqual(
             VersionRefreshService.commandTimeout(for: ["npm", "view", "@openai/codex", "version"]),
-            4
+            15
+        )
+        XCTAssertEqual(
+            VersionRefreshService.commandTimeout(for: ["/Users/test/.nvm/versions/node/v24.14.0/bin/npm", "view", "@openai/codex", "version"]),
+            15
         )
     }
 
