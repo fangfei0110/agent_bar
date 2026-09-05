@@ -45,15 +45,19 @@ struct VersionRefreshService: Sendable {
         )
         let configPath = resolveConfigPath(for: provider)
         let statusVersions: (current: String?, latest: String?)
+        var versionError: String?
         switch provider {
         case .openClaw:
             statusVersions = openClawStatusVersions(executablePath: executablePath)
         case .hermes:
-            statusVersions = hermesStatusVersions(executablePath: executablePath)
+            let result = hermesStatusVersions(executablePath: executablePath)
+            statusVersions = (result.current, result.latest)
+            versionError = result.error
         default:
             statusVersions = (current: nil, latest: nil)
         }
-        let current = statusVersions.current ?? currentVersion(for: provider, executablePath: executablePath)
+        let current = provider == .hermes ? statusVersions.current :
+            (statusVersions.current ?? currentVersion(for: provider, executablePath: executablePath))
         let latest = statusVersions.latest ?? latestVersion(
             for: provider,
             installSource: installSource,
@@ -67,6 +71,8 @@ struct VersionRefreshService: Sendable {
         let error: String?
         if executablePath == nil {
             error = "CLI not found on PATH or common install locations"
+        } else if let versionError {
+            error = versionError
         } else if current == nil && latest == nil {
             error = "No version information available"
         } else {
@@ -105,21 +111,25 @@ struct VersionRefreshService: Sendable {
         )
     }
 
-    private func hermesStatusVersions(executablePath: String?) -> (current: String?, latest: String?) {
-        guard let executablePath,
-              let output = runTextCommand([executablePath, "--version"]) else {
-            return (nil, nil)
+    private func hermesStatusVersions(executablePath: String?) -> (current: String?, latest: String?, error: String?) {
+        guard let executablePath else { return (nil, nil, nil) }
+        let output = commandRunner([executablePath, "--version"])
+        // Hermes prints its local version before a synchronous network update check.
+        // A timed-out check must not discard that already-known local version.
+        guard output.exitCode == 0 || output.exitCode == 124 else {
+            return (nil, nil, "Hermes version command failed (exit \(output.exitCode))")
+        }
+        guard let current = VersionParsing.extractHermesVersion(from: output.stdout) else {
+            let error = output.exitCode == 124 ? "Hermes version check timed out" : "Hermes did not report its installed version"
+            return (nil, nil, error)
         }
 
-        let current = VersionParsing.extractFirstVersion(from: output)
-        let latest: String?
-        if output.localizedCaseInsensitiveContains("up to date") {
-            latest = current
-        } else {
-            latest = nil
+        guard output.exitCode == 0 else { return (current, nil, nil) }
+        if let behind = VersionParsing.extractCommitsBehindTitle(from: output.stdout) {
+            return (current, behind, nil)
         }
-
-        return (current, latest)
+        let latest = output.stdout.localizedCaseInsensitiveContains("up to date") ? current : nil
+        return (current, latest, nil)
     }
 
     private func currentVersion(for provider: ProviderKind, executablePath: String?) -> String? {
@@ -141,12 +151,6 @@ struct VersionRefreshService: Sendable {
     }
 
     private func latestVersion(for provider: ProviderKind, installSource: InstallSource, executablePath: String?) -> String? {
-        if provider == .hermes,
-           let versionOutput = executablePath.flatMap({ runTextCommand([$0, "--version"]) }),
-           let commitsBehindTitle = VersionParsing.extractCommitsBehindTitle(from: versionOutput) {
-            return commitsBehindTitle
-        }
-
         if installSource == .sourceCheckout {
             return sourceCheckoutBehindTitle(executablePath: executablePath)
         }
@@ -434,64 +438,7 @@ struct VersionRefreshService: Sendable {
     }
 
     static func runCommand(_ command: [String]) -> CommandOutput {
-        guard let executable = command.first else {
-            return CommandOutput(exitCode: 1, stdout: "", stderr: "Missing executable")
-        }
-
-        let process = Process()
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-
-        if executable.hasPrefix("/") {
-            process.executableURL = URL(fileURLWithPath: executable)
-            process.arguments = Array(command.dropFirst())
-        } else {
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = command
-        }
-        process.environment = processEnvironment(for: command)
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        do {
-            try process.run()
-        } catch {
-            return CommandOutput(exitCode: 1, stdout: "", stderr: error.localizedDescription)
-        }
-
-        let timeout = commandTimeout(for: command)
-        let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning, Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-
-        if process.isRunning {
-            process.terminate()
-
-            let terminationDeadline = Date().addingTimeInterval(0.2)
-            while process.isRunning, Date() < terminationDeadline {
-                Thread.sleep(forTimeInterval: 0.02)
-            }
-
-            if process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-                process.waitUntilExit()
-            }
-
-            return CommandOutput(
-                exitCode: 124,
-                stdout: String(decoding: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
-                stderr: "Command timed out after \(Self.timeoutDisplayString(timeout)) seconds"
-            )
-        }
-
-        process.waitUntilExit()
-
-        return CommandOutput(
-            exitCode: process.terminationStatus,
-            stdout: String(decoding: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
-            stderr: String(decoding: stderrPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        )
+        CommandExecutor.run(command, timeout: commandTimeout(for: command), isCancelled: { Task.isCancelled })
     }
 
     static func commandEnvironment(base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
@@ -505,6 +452,11 @@ struct VersionRefreshService: Sendable {
         fileManager: FileManager = .default
     ) -> [String: String] {
         var environment = baseEnvironment
+        if command.first.map({ URL(fileURLWithPath: $0).lastPathComponent }) == "hermes",
+           command.dropFirst() == ["--version"] {
+            // Python otherwise buffers the banner when stdout is a pipe, losing it on timeout.
+            environment["PYTHONUNBUFFERED"] = "1"
+        }
         let resolvedHome = environment["HOME"] ?? homeDirectory
         environment["HOME"] = resolvedHome
 
@@ -544,8 +496,8 @@ struct VersionRefreshService: Sendable {
     }
 
     static func commandTimeout(for command: [String]) -> TimeInterval {
-        if let executable = command.first,
-           executable.hasSuffix("/hermes"),
+        let executable = command.first.map { URL(fileURLWithPath: $0).lastPathComponent }
+        if executable == "hermes",
            command.dropFirst() == ["--version"] {
             return 6
         }
@@ -567,14 +519,6 @@ struct VersionRefreshService: Sendable {
         }
 
         return 3
-    }
-
-    private static func timeoutDisplayString(_ timeout: TimeInterval) -> String {
-        if timeout.rounded(.towardZero) == timeout {
-            return String(Int(timeout))
-        }
-
-        return String(timeout)
     }
 
     private static func leadingPathEntries(
@@ -684,7 +628,7 @@ struct VersionRefreshService: Sendable {
     private static func terminalShellCommand(command: [String], workingDirectory: String) -> String {
         let cdPart = "cd \(shellQuoted(workingDirectory))"
         let commandPart = command.map(shellQuoted).joined(separator: " ")
-        let tail = "status=$?; echo; echo \"Command finished with exit code $status.\"; exec $SHELL -l"
+        let tail = "commandStatus=$?; echo; echo \"Command finished with exit code $commandStatus.\"; exec $SHELL -l"
         return "\(cdPart); \(commandPart); \(tail)"
     }
 
@@ -709,6 +653,13 @@ private extension Array where Element == String {
 }
 
 enum VersionParsing {
+    static func extractHermesVersion(from text: String) -> String? {
+        guard let banner = text.range(of: #"(?m)^Hermes Agent v?\d+(?:\.\d+)+(?:[-+][A-Za-z0-9._-]+)?"#, options: .regularExpression) else {
+            return nil
+        }
+        return extractFirstVersion(from: String(text[banner]))
+    }
+
     static func extractFirstVersion(from text: String) -> String? {
         if let match = text.range(of: #"\d+(?:\.\d+)+(?:[-+][A-Za-z0-9._-]+)?"#, options: .regularExpression) {
             return String(text[match])

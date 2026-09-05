@@ -17,6 +17,7 @@ env CLANG_MODULE_CACHE_PATH=/tmp/clang-module-cache \
 mkdir -p "$BUNDLE_MACOS" "$BUNDLE_RESOURCES"
 cp "$BINARY" "$BUNDLE_MACOS/AgentVersionBarApp"
 cp "$PLIST" "$BUNDLE_ROOT/Contents/Info.plist"
+cp -R "$ROOT/Sources/AgentVersionBarApp/Resources/ProviderIcons" "$BUNDLE_RESOURCES/"
 if [[ -f "$ICON" ]]; then
     cp "$ICON" "$BUNDLE_RESOURCES/AppIcon.icns"
 fi

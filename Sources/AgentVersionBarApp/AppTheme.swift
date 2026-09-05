@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum AppThemeStyle: String, CaseIterable, Identifiable, Sendable {
@@ -7,12 +8,20 @@ enum AppThemeStyle: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    var next: Self {
+        switch self {
+        case .light: return .warm
+        case .warm: return .dark
+        case .dark: return .light
+        }
+    }
+
     var displayTitle: String {
         switch self {
         case .warm:
             return "Warm"
         case .light:
-            return "Light"
+            return "Cool"
         case .dark:
             return "Dark"
         }
@@ -43,56 +52,58 @@ struct ThemeColorToken: Equatable {
         self.opacity = opacity
     }
 
-    var color: Color {
-        Color(red: red, green: green, blue: blue).opacity(opacity)
+    // Use PulseBar's OKLCH palette in the existing token model.
+    init(_ lightness: Double, _ chroma: Double, _ hue: Double, opacity: Double = 1) {
+        let a = chroma * cos(hue * .pi / 180)
+        let b = chroma * sin(hue * .pi / 180)
+        let l = pow(lightness + 0.3963377774 * a + 0.2158037573 * b, 3)
+        let m = pow(lightness - 0.1055613458 * a - 0.0638541728 * b, 3)
+        let s = pow(lightness - 0.0894841775 * a - 1.2914855480 * b, 3)
+        func gamma(_ value: Double) -> Double {
+            min(1, max(0, value <= 0.0031308 ? 12.92 * value : 1.055 * pow(value, 1 / 2.4) - 0.055))
+        }
+        self.init(
+            red: gamma(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+            green: gamma(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+            blue: gamma(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s),
+            opacity: opacity
+        )
     }
 
-    func withOpacity(_ opacity: Double) -> ThemeColorToken {
-        ThemeColorToken(red: red, green: green, blue: blue, opacity: opacity)
+    var color: Color {
+        Color(red: red, green: green, blue: blue).opacity(opacity)
     }
 }
 
 struct ThemePalette: Equatable {
+    var isDark: Bool { strongTextToken.red > 0.8 }
     let panelBackgroundTopToken: ThemeColorToken
-    let panelBackgroundBottomToken: ThemeColorToken
     let elevatedSurfaceToken: ThemeColorToken
-    let elevatedSurfaceTopToken: ThemeColorToken
-    let elevatedSurfaceBottomToken: ThemeColorToken
-    let subtleStrokeToken: ThemeColorToken
     let heavyStrokeToken: ThemeColorToken
     let strongTextToken: ThemeColorToken
     let secondaryTextToken: ThemeColorToken
     let tertiaryTextToken: ThemeColorToken
     let shadowToken: ThemeColorToken
-    let metricTileFillToken: ThemeColorToken
-    let metricTileStrokeToken: ThemeColorToken
-    let secondaryButtonFillToken: ThemeColorToken
-    let quietBorderToken: ThemeColorToken
-    let codeBlockFillToken: ThemeColorToken
-    let codeBlockStrokeToken: ThemeColorToken
     let rowDividerToken: ThemeColorToken
-    let updateHighlightToken: ThemeColorToken
+    let brandToken: ThemeColorToken
+    let supportingToken: ThemeColorToken
+    let warningToken: ThemeColorToken
+    let positiveToken: ThemeColorToken
+    let onTintToken: ThemeColorToken
 
     var panelBackgroundTop: Color { panelBackgroundTopToken.color }
-    var panelBackgroundBottom: Color { panelBackgroundBottomToken.color }
-    var windowBackground: Color { panelBackgroundBottomToken.color }
     var elevatedSurface: Color { elevatedSurfaceToken.color }
-    var elevatedSurfaceTop: Color { elevatedSurfaceTopToken.color }
-    var elevatedSurfaceBottom: Color { elevatedSurfaceBottomToken.color }
-    var subtleStroke: Color { subtleStrokeToken.color }
     var heavyStroke: Color { heavyStrokeToken.color }
     var strongText: Color { strongTextToken.color }
     var secondaryText: Color { secondaryTextToken.color }
     var tertiaryText: Color { tertiaryTextToken.color }
     var shadow: Color { shadowToken.color }
-    var metricTileFill: Color { metricTileFillToken.color }
-    var metricTileStroke: Color { metricTileStrokeToken.color }
-    var secondaryButtonFill: Color { secondaryButtonFillToken.color }
-    var quietBorder: Color { quietBorderToken.color }
-    var codeBlockFill: Color { codeBlockFillToken.color }
-    var codeBlockStroke: Color { codeBlockStrokeToken.color }
     var rowDivider: Color { rowDividerToken.color }
-    var updateHighlight: Color { updateHighlightToken.color }
+    var brand: Color { brandToken.color }
+    var supporting: Color { supportingToken.color }
+    var warning: Color { warningToken.color }
+    var positive: Color { positiveToken.color }
+    var onTint: Color { onTintToken.color }
 }
 
 enum DashboardAccent: Equatable {
@@ -101,22 +112,14 @@ enum DashboardAccent: Equatable {
     case info
     case muted
 
-    var token: ThemeColorToken {
+    func color(in theme: ThemePalette) -> Color {
         switch self {
-        case .success:
-            return ThemeColorToken(red: 0.33, green: 0.63, blue: 0.46)
-        case .warning:
-            return ThemeColorToken(red: 0.83, green: 0.56, blue: 0.27)
-        case .info:
-            return ThemeColorToken(red: 0.45, green: 0.61, blue: 0.76)
-        case .muted:
-            return ThemeColorToken(red: 0.56, green: 0.51, blue: 0.46)
+        case .success: return theme.positive
+        case .warning: return theme.warning
+        case .info: return theme.supporting
+        case .muted: return theme.secondaryText
         }
     }
-
-    var color: Color { token.color }
-    var softFill: Color { token.withOpacity(0.14).color }
-    var stroke: Color { token.withOpacity(0.28).color }
 }
 
 enum AppTheme {
@@ -124,79 +127,57 @@ enum AppTheme {
         switch style {
         case .warm:
             return ThemePalette(
-                panelBackgroundTopToken: ThemeColorToken(red: 0.98, green: 0.95, blue: 0.91),
-                panelBackgroundBottomToken: ThemeColorToken(red: 0.94, green: 0.89, blue: 0.83),
-                elevatedSurfaceToken: ThemeColorToken(red: 0.99, green: 0.97, blue: 0.95),
-                elevatedSurfaceTopToken: ThemeColorToken(red: 1.00, green: 0.99, blue: 0.98, opacity: 0.78),
-                elevatedSurfaceBottomToken: ThemeColorToken(red: 0.91, green: 0.86, blue: 0.79, opacity: 0.64),
-                subtleStrokeToken: ThemeColorToken(red: 0.69, green: 0.61, blue: 0.50, opacity: 0.18),
-                heavyStrokeToken: ThemeColorToken(red: 0.63, green: 0.55, blue: 0.44, opacity: 0.28),
-                strongTextToken: ThemeColorToken(red: 0.24, green: 0.18, blue: 0.14, opacity: 0.96),
-                secondaryTextToken: ThemeColorToken(red: 0.40, green: 0.33, blue: 0.27, opacity: 0.82),
-                tertiaryTextToken: ThemeColorToken(red: 0.53, green: 0.45, blue: 0.38, opacity: 0.72),
-                shadowToken: ThemeColorToken(red: 0.31, green: 0.22, blue: 0.14, opacity: 0.10),
-                metricTileFillToken: ThemeColorToken(red: 0.95, green: 0.92, blue: 0.87, opacity: 0.96),
-                metricTileStrokeToken: ThemeColorToken(red: 0.71, green: 0.63, blue: 0.54, opacity: 0.12),
-                secondaryButtonFillToken: ThemeColorToken(red: 1.00, green: 0.99, blue: 0.98, opacity: 0.62),
-                quietBorderToken: ThemeColorToken(red: 0.71, green: 0.63, blue: 0.54, opacity: 0.16),
-                codeBlockFillToken: ThemeColorToken(red: 0.96, green: 0.93, blue: 0.89, opacity: 0.98),
-                codeBlockStrokeToken: ThemeColorToken(red: 0.69, green: 0.61, blue: 0.50, opacity: 0.14),
-                rowDividerToken: ThemeColorToken(red: 0.71, green: 0.63, blue: 0.54, opacity: 0.12),
-                updateHighlightToken: ThemeColorToken(red: 0.78, green: 0.27, blue: 0.23, opacity: 0.96)
+                panelBackgroundTopToken: ThemeColorToken(0.95, 0.021, 72),
+                elevatedSurfaceToken: ThemeColorToken(0.993, 0.007, 72),
+                heavyStrokeToken: ThemeColorToken(0.27, 0.024, 52, opacity: 0.12),
+                strongTextToken: ThemeColorToken(0.27, 0.024, 52),
+                secondaryTextToken: ThemeColorToken(0.46, 0.026, 52),
+                tertiaryTextToken: ThemeColorToken(0.46, 0.026, 52),
+                shadowToken: ThemeColorToken(0.27, 0.024, 52, opacity: 0.08),
+                rowDividerToken: ThemeColorToken(0.27, 0.024, 52, opacity: 0.08),
+                brandToken: ThemeColorToken(0.50, 0.115, 42),
+                supportingToken: ThemeColorToken(0.50, 0.075, 12),
+                warningToken: ThemeColorToken(0.50, 0.17, 28),
+                positiveToken: ThemeColorToken(0.47, 0.075, 151),
+                onTintToken: ThemeColorToken(1, 0, 0)
             )
         case .light:
             return ThemePalette(
-                panelBackgroundTopToken: ThemeColorToken(red: 0.96, green: 0.97, blue: 0.99),
-                panelBackgroundBottomToken: ThemeColorToken(red: 0.89, green: 0.92, blue: 0.97),
-                elevatedSurfaceToken: ThemeColorToken(red: 0.99, green: 0.99, blue: 1.00),
-                elevatedSurfaceTopToken: ThemeColorToken(red: 1.00, green: 1.00, blue: 1.00, opacity: 0.82),
-                elevatedSurfaceBottomToken: ThemeColorToken(red: 0.86, green: 0.90, blue: 0.96, opacity: 0.48),
-                subtleStrokeToken: ThemeColorToken(red: 0.60, green: 0.68, blue: 0.80, opacity: 0.16),
-                heavyStrokeToken: ThemeColorToken(red: 0.54, green: 0.62, blue: 0.74, opacity: 0.26),
-                strongTextToken: ThemeColorToken(red: 0.14, green: 0.19, blue: 0.28, opacity: 0.96),
-                secondaryTextToken: ThemeColorToken(red: 0.28, green: 0.35, blue: 0.47, opacity: 0.82),
-                tertiaryTextToken: ThemeColorToken(red: 0.42, green: 0.49, blue: 0.60, opacity: 0.72),
-                shadowToken: ThemeColorToken(red: 0.19, green: 0.24, blue: 0.31, opacity: 0.08),
-                metricTileFillToken: ThemeColorToken(red: 0.93, green: 0.96, blue: 0.99, opacity: 0.96),
-                metricTileStrokeToken: ThemeColorToken(red: 0.62, green: 0.69, blue: 0.80, opacity: 0.10),
-                secondaryButtonFillToken: ThemeColorToken(red: 0.99, green: 1.00, blue: 1.00, opacity: 0.70),
-                quietBorderToken: ThemeColorToken(red: 0.62, green: 0.69, blue: 0.80, opacity: 0.14),
-                codeBlockFillToken: ThemeColorToken(red: 0.94, green: 0.97, blue: 1.00, opacity: 0.98),
-                codeBlockStrokeToken: ThemeColorToken(red: 0.60, green: 0.68, blue: 0.80, opacity: 0.12),
-                rowDividerToken: ThemeColorToken(red: 0.62, green: 0.69, blue: 0.80, opacity: 0.10),
-                updateHighlightToken: ThemeColorToken(red: 0.79, green: 0.22, blue: 0.22, opacity: 0.96)
+                panelBackgroundTopToken: ThemeColorToken(0.95, 0.008, 166),
+                elevatedSurfaceToken: ThemeColorToken(0.993, 0.002, 166),
+                heavyStrokeToken: ThemeColorToken(0.25, 0.014, 166, opacity: 0.12),
+                strongTextToken: ThemeColorToken(0.25, 0.014, 166),
+                secondaryTextToken: ThemeColorToken(0.48, 0.012, 166),
+                tertiaryTextToken: ThemeColorToken(0.48, 0.012, 166),
+                shadowToken: ThemeColorToken(0.25, 0.014, 166, opacity: 0.08),
+                rowDividerToken: ThemeColorToken(0.25, 0.014, 166, opacity: 0.08),
+                brandToken: ThemeColorToken(0.48, 0.095, 166),
+                supportingToken: ThemeColorToken(0.52, 0.09, 250),
+                warningToken: ThemeColorToken(0.55, 0.135, 43),
+                positiveToken: ThemeColorToken(0.48, 0.095, 166),
+                onTintToken: ThemeColorToken(1, 0, 0)
             )
         case .dark:
             return ThemePalette(
-                panelBackgroundTopToken: ThemeColorToken(red: 0.10, green: 0.12, blue: 0.15),
-                panelBackgroundBottomToken: ThemeColorToken(red: 0.06, green: 0.07, blue: 0.10),
-                elevatedSurfaceToken: ThemeColorToken(red: 0.13, green: 0.15, blue: 0.19),
-                elevatedSurfaceTopToken: ThemeColorToken(red: 0.20, green: 0.23, blue: 0.28, opacity: 0.30),
-                elevatedSurfaceBottomToken: ThemeColorToken(red: 0.03, green: 0.04, blue: 0.06, opacity: 0.36),
-                subtleStrokeToken: ThemeColorToken(red: 0.85, green: 0.88, blue: 0.93, opacity: 0.08),
-                heavyStrokeToken: ThemeColorToken(red: 0.85, green: 0.88, blue: 0.93, opacity: 0.14),
-                strongTextToken: ThemeColorToken(red: 0.95, green: 0.97, blue: 0.99, opacity: 0.96),
-                secondaryTextToken: ThemeColorToken(red: 0.77, green: 0.81, blue: 0.87, opacity: 0.82),
-                tertiaryTextToken: ThemeColorToken(red: 0.59, green: 0.65, blue: 0.73, opacity: 0.72),
-                shadowToken: ThemeColorToken(red: 0.00, green: 0.00, blue: 0.00, opacity: 0.24),
-                metricTileFillToken: ThemeColorToken(red: 0.08, green: 0.10, blue: 0.13, opacity: 0.96),
-                metricTileStrokeToken: ThemeColorToken(red: 0.85, green: 0.88, blue: 0.93, opacity: 0.08),
-                secondaryButtonFillToken: ThemeColorToken(red: 0.22, green: 0.25, blue: 0.30, opacity: 0.54),
-                quietBorderToken: ThemeColorToken(red: 0.85, green: 0.88, blue: 0.93, opacity: 0.10),
-                codeBlockFillToken: ThemeColorToken(red: 0.07, green: 0.09, blue: 0.12, opacity: 0.98),
-                codeBlockStrokeToken: ThemeColorToken(red: 0.85, green: 0.88, blue: 0.93, opacity: 0.10),
-                rowDividerToken: ThemeColorToken(red: 0.85, green: 0.88, blue: 0.93, opacity: 0.08),
-                updateHighlightToken: ThemeColorToken(red: 0.97, green: 0.47, blue: 0.43, opacity: 0.96)
+                panelBackgroundTopToken: ThemeColorToken(0.19, 0.016, 166),
+                elevatedSurfaceToken: ThemeColorToken(0.27, 0.015, 166),
+                heavyStrokeToken: ThemeColorToken(0.95, 0.008, 166, opacity: 0.12),
+                strongTextToken: ThemeColorToken(0.95, 0.008, 166),
+                secondaryTextToken: ThemeColorToken(0.76, 0.012, 166),
+                tertiaryTextToken: ThemeColorToken(0.76, 0.012, 166),
+                shadowToken: ThemeColorToken(0, 0, 0, opacity: 0.10),
+                rowDividerToken: ThemeColorToken(0.95, 0.008, 166, opacity: 0.08),
+                brandToken: ThemeColorToken(0.76, 0.095, 166),
+                supportingToken: ThemeColorToken(0.76, 0.08, 250),
+                warningToken: ThemeColorToken(0.78, 0.105, 43),
+                positiveToken: ThemeColorToken(0.76, 0.095, 166),
+                onTintToken: ThemeColorToken(0.15, 0.015, 166)
             )
         }
     }
 }
 
 extension VersionStatus {
-    var showsLeadingPanelStatusIcon: Bool {
-        false
-    }
-
     var dashboardAccent: DashboardAccent {
         switch self {
         case .upToDate:
@@ -224,78 +205,87 @@ extension VersionStatus {
     }
 }
 
-struct DashboardPanelBackground: ViewModifier {
-    let theme: ThemePalette
+struct FrostedGlass: NSViewRepresentable {
+    let isDark: Bool
 
-    func body(content: Content) -> some View {
-        content
-            .background(
-                LinearGradient(
-                    colors: [theme.panelBackgroundTop, theme.panelBackgroundBottom],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = FrostedEffectView()
+        view.material = .popover
+        view.blendingMode = .behindWindow
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
     }
 }
 
-struct DashboardCardStyle: ViewModifier {
+private final class FrostedEffectView: NSVisualEffectView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.isOpaque = false
+        window?.backgroundColor = .clear
+        window?.titlebarAppearsTransparent = true
+    }
+}
+
+struct DashboardPanelBackground: ViewModifier {
     let theme: ThemePalette
-    let accent: DashboardAccent?
-    let paddingAmount: CGFloat
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     func body(content: Content) -> some View {
-        content
-            .padding(paddingAmount)
-            .background(cardBackground)
-            .overlay(cardOverlay)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: theme.shadow.opacity(0.75), radius: 10, x: 0, y: 4)
-    }
-
-    private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [theme.elevatedSurfaceTop, theme.elevatedSurfaceBottom],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(theme.elevatedSurface)
-            )
-    }
-
-    @ViewBuilder
-    private var cardOverlay: some View {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .strokeBorder(theme.subtleStroke, lineWidth: 1)
-
-        if let accent {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(accent.stroke.opacity(0.55), lineWidth: 1)
-                .padding(0.5)
+        content.background {
+            ZStack {
+                if !reduceTransparency { FrostedGlass(isDark: theme.isDark) }
+                theme.panelBackgroundTop.opacity(reduceTransparency ? 1 : (theme.isDark ? 0.96 : 0.94))
+            }
+            .ignoresSafeArea()
         }
     }
 }
 
-struct DashboardMetricTileStyle: ViewModifier {
+struct GlassButtonStyle: ButtonStyle {
     let theme: ThemePalette
+    var prominent = false
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovered = false
 
-    func body(content: Content) -> some View {
-        content
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(theme.metricTileFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(theme.metricTileStroke, lineWidth: 1)
-            )
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(prominent ? theme.strongText : theme.secondaryText)
+            .padding(.horizontal, 9)
+            .frame(height: 28)
+            .background {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(theme.strongText.opacity(configuration.isPressed ? 0.17 : (hovered ? 0.11 : (prominent ? 0.08 : 0.035))))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(theme.heavyStroke.opacity(prominent || hovered ? 1 : 0.4), lineWidth: 0.5)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .opacity(isEnabled ? 1 : 0.4)
+            .onHover { hovered = $0 }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
+    }
+}
+
+struct GlassIconButton: View {
+    let title: String
+    let symbol: String
+    let theme: ThemePalette
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).frame(width: 12)
+        }
+        .buttonStyle(GlassButtonStyle(theme: theme))
+        .help(title)
+        .accessibilityLabel(title)
     }
 }
 
@@ -304,11 +294,4 @@ extension View {
         modifier(DashboardPanelBackground(theme: theme))
     }
 
-    func dashboardCard(theme: ThemePalette, accent: DashboardAccent? = nil, padding: CGFloat = 14) -> some View {
-        modifier(DashboardCardStyle(theme: theme, accent: accent, paddingAmount: padding))
-    }
-
-    func dashboardMetricTile(theme: ThemePalette) -> some View {
-        modifier(DashboardMetricTileStyle(theme: theme))
-    }
 }

@@ -18,8 +18,9 @@ final class ChangelogWindowModel: ObservableObject {
     }
 
     func open(snapshot: ProviderVersionSnapshot) {
+        loadTask?.cancel()
+        loadTask = nil
         guard let request = ChangelogRequest(snapshot: snapshot) else {
-            loadTask?.cancel()
             state = cachedContentByProvider[snapshot.provider].map(ChangelogViewState.loaded) ?? .unavailable(snapshot.provider)
             return
         }
@@ -30,6 +31,19 @@ final class ChangelogWindowModel: ObservableObject {
         }
 
         load(request: request)
+    }
+
+    func retry() {
+        switch state {
+        case let .loaded(content), let .showingOriginal(content):
+            load(request: content.request)
+        case let .loading(request, _):
+            load(request: request)
+        case let .failed(provider, _):
+            if let request = lastRequest, request.provider == provider { load(request: request) }
+        case .idle, .unavailable:
+            break
+        }
     }
 
     func hasCachedContent(for provider: ProviderKind) -> Bool {
@@ -50,8 +64,11 @@ final class ChangelogWindowModel: ObservableObject {
         }
     }
 
+    private var lastRequest: ChangelogRequest?
+
     private func load(request: ChangelogRequest) {
         loadTask?.cancel()
+        lastRequest = request
         state = .loading(request, .fetching)
 
         loadTask = Task { [service] in
@@ -68,9 +85,7 @@ final class ChangelogWindowModel: ObservableObject {
                     summaryErrorDescription: nil
                 )
 
-                await MainActor.run {
-                    self.state = .showingOriginal(partialContent)
-                }
+                self.state = .showingOriginal(partialContent)
 
                 let summaryInput = ChangelogService.latestVersionSections(from: originalContent, limit: 2)
                 let content: ChangelogContent
@@ -95,18 +110,14 @@ final class ChangelogWindowModel: ObservableObject {
                     return
                 }
 
-                await MainActor.run {
-                    self.cache[request] = content
-                    self.cachedContentByProvider[request.provider] = content
-                    self.state = .loaded(content)
-                }
+                self.cache[request] = content
+                self.cachedContentByProvider[request.provider] = content
+                self.state = .loaded(content)
             } catch {
                 guard Task.isCancelled == false else {
                     return
                 }
-                await MainActor.run {
-                    self.state = .failed(request.provider, error.localizedDescription)
-                }
+                self.state = .failed(request.provider, error.localizedDescription)
             }
         }
     }

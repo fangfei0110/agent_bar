@@ -18,7 +18,8 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "AgentVersionBarApp"
+            name: "AgentVersionBarApp",
+            resources: [.copy("Resources/ProviderIcons")]
         ),
         .testTarget(
             name: "AgentVersionBarTests",

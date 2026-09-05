@@ -14,6 +14,23 @@ Lightweight macOS menu bar app for tracking installed and latest versions of:
 - Installed version from the local CLI
 - Latest available version from the official package source
 - Install source detection (`Homebrew`, `npm`, `pnpm`, `Native Installer`, `Direct Binary`)
+- Native frosted-glass panels with light, dark, and warm themes; opaque fallback for Reduce Transparency
+- Official changelog, original text, and a Chinese summary (requires `summarize`; uses Codex when available)
+
+## Refresh And Updates
+
+New installations check every five minutes. An explicitly saved Off setting stays off.
+Manual updates open in Terminal. Automatic updates are opt-in in Settings and only
+run for an installed agent with a newer available version and a supported package
+manager executable next to that agent's CLI. Native installers and unmanaged
+binaries remain manual. Failed automatic updates show an error and are not
+repeated for the same version during that app session; manual updates remain available.
+Successful automatic updates refresh the installed versions.
+
+Version checks and changelog commands share the same GUI-safe environment,
+concurrently drain command input/output, and enforce timeouts.
+Changelog summaries use `codex exec` in read-only, ephemeral mode when available,
+respecting the model configured in Codex. Without Codex they use `summarize`.
 
 ## Version Sources
 
@@ -42,6 +59,12 @@ Lightweight macOS menu bar app for tracking installed and latest versions of:
 
 ```bash
 swift run AgentVersionBarApp
+```
+
+To build a Release bundle, install it in `/Applications`, and relaunch it:
+
+```bash
+bash Scripts/install_app_bundle.sh
 ```
 
 ## Test

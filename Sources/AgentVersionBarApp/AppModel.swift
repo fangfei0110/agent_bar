@@ -10,10 +10,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var snapshots: [ProviderVersionSnapshot]
     @Published private(set) var isRefreshing = false
     @Published private(set) var updatingProviders: Set<ProviderKind> = []
+    @Published private(set) var updateErrors: [ProviderKind: String] = [:]
     let workspacePath: String
     @Published var autoUpdateBehavior: AutoUpdateBehavior {
         didSet {
             defaults.set(autoUpdateBehavior.rawValue, forKey: Self.autoUpdateBehaviorDefaultsKey)
+            if autoUpdateBehavior != oldValue { automaticAttempts.removeAll() }
         }
     }
     @Published var refreshInterval: RefreshInterval {
@@ -28,7 +30,9 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private let service: VersionRefreshService
+    private let refreshSnapshots: @Sendable () async -> [ProviderVersionSnapshot]
+    private let automaticUpdater: @Sendable ([String]) async -> CommandOutput
+    private var automaticAttempts: [ProviderKind: String] = [:]
     private let defaults: UserDefaults
     private var autoRefreshTask: Task<Void, Never>?
     private var visibleProviders: Set<ProviderKind>
@@ -40,16 +44,22 @@ final class AppModel: ObservableObject {
         service: VersionRefreshService = .live,
         defaults: UserDefaults = .standard,
         autoload: Bool = true,
-        workspacePath: String? = nil
+        workspacePath: String? = nil,
+        refreshSnapshots: (@Sendable () async -> [ProviderVersionSnapshot])? = nil,
+        automaticUpdater: @escaping @Sendable ([String]) async -> CommandOutput = {
+            await CommandExecutor.runAsync($0, timeout: 300)
+        }
     ) {
         self.defaults = defaults
         let storedValue = defaults.integer(forKey: Self.refreshIntervalDefaultsKey)
         let storedAutoUpdateBehavior = defaults.string(forKey: Self.autoUpdateBehaviorDefaultsKey)
         let storedThemeStyle = defaults.string(forKey: Self.appThemeStyleDefaultsKey)
-        self.refreshInterval = RefreshInterval(rawValue: storedValue) ?? .fiveMinutes
+        self.refreshInterval = defaults.object(forKey: Self.refreshIntervalDefaultsKey) == nil
+            ? .fiveMinutes : (RefreshInterval(rawValue: storedValue) ?? .fiveMinutes)
         self.autoUpdateBehavior = AutoUpdateBehavior(rawValue: storedAutoUpdateBehavior ?? "") ?? .notifyOnly
         self.themeStyle = AppThemeStyle(rawValue: storedThemeStyle ?? "") ?? .light
-        self.service = service
+        self.refreshSnapshots = refreshSnapshots ?? { await service.refreshAll() }
+        self.automaticUpdater = automaticUpdater
         self.workspacePath = workspacePath ?? Self.resolveWorkspacePath()
         self.snapshots = ProviderKind.allCases.map(ProviderVersionSnapshot.placeholder(for:))
         self.visibleProviders = Set(
@@ -62,9 +72,8 @@ final class AppModel: ObservableObject {
                 return defaults.bool(forKey: key)
             }
         )
-        rescheduleAutoRefresh()
-
         if autoload {
+            rescheduleAutoRefresh()
             Task {
                 await refresh()
             }
@@ -92,7 +101,11 @@ final class AppModel: ObservableObject {
             return "Never checked"
         }
 
-        return RelativeDateTimeFormatter().localizedString(for: latestCheckedAt, relativeTo: date)
+        if date.timeIntervalSince(latestCheckedAt) < 5 { return "just now" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: latestCheckedAt, relativeTo: date)
     }
 
     func refresh() async {
@@ -101,9 +114,34 @@ final class AppModel: ObservableObject {
         }
 
         isRefreshing = true
-        let refreshed = await service.refreshAll()
+        let refreshed = await refreshSnapshots()
         snapshots = refreshed
+        await runAutomaticUpdates()
         isRefreshing = false
+    }
+
+    private func runAutomaticUpdates() async {
+        var didUpdate = false
+        for snapshot in snapshots {
+            guard !Task.isCancelled, autoUpdateBehavior == .packageManagerWhenPossible else { break }
+            guard snapshot.isInstalled, snapshot.status == .updateAvailable,
+                  !updatingProviders.contains(snapshot.provider),
+                  let command = snapshot.automaticUpdateCommand else { continue }
+            let attempt = [snapshot.currentTitle, snapshot.latestTitle, command.joined(separator: " ")].joined(separator: "|")
+            guard automaticAttempts[snapshot.provider] != attempt else { continue }
+            automaticAttempts[snapshot.provider] = attempt
+            updatingProviders.insert(snapshot.provider)
+            updateErrors[snapshot.provider] = nil
+            let result = await automaticUpdater(command)
+            updatingProviders.remove(snapshot.provider)
+            if result.exitCode == 0 {
+                didUpdate = true
+            } else {
+                let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                updateErrors[snapshot.provider] = detail.isEmpty ? "Update failed (exit \(result.exitCode))" : detail
+            }
+        }
+        if didUpdate { snapshots = await refreshSnapshots() }
     }
 
     func isUpdating(_ provider: ProviderKind) -> Bool {
@@ -122,9 +160,12 @@ final class AppModel: ObservableObject {
         }
 
         updatingProviders.insert(provider)
+        updateErrors[provider] = nil
 
         Task {
-            VersionRefreshService.launchCommandInTerminal(command, workingDirectory: NSHomeDirectory())
+            await Task.detached {
+                VersionRefreshService.launchCommandInTerminal(command, workingDirectory: NSHomeDirectory())
+            }.value
             updatingProviders.remove(provider)
         }
     }

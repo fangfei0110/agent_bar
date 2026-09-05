@@ -16,7 +16,7 @@ struct AgentVersionBarApp: App {
         WindowGroup("Settings", id: SettingsView.windowID) {
             SettingsView(model: model)
         }
-        .defaultSize(width: 500, height: 540)
+        .defaultSize(width: 620, height: 620)
 
         WindowGroup("Changelog", id: ChangelogView.windowID) {
             ChangelogView(appModel: model, model: changelogModel)

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import AgentVersionBarApp
@@ -20,23 +21,44 @@ struct AppThemeTests {
     }
 
     @Test
-    func panelCardsRelyOnTrailingStatusBadgeOnly() {
-        #expect(VersionStatus.upToDate.showsLeadingPanelStatusIcon == false)
-        #expect(VersionStatus.updateAvailable.showsLeadingPanelStatusIcon == false)
-        #expect(VersionStatus.currentOnly.showsLeadingPanelStatusIcon == false)
-        #expect(VersionStatus.latestOnly.showsLeadingPanelStatusIcon == false)
-        #expect(VersionStatus.unavailable.showsLeadingPanelStatusIcon == false)
+    func textMeetsContrastOnOpaqueAccessibilityFallback() {
+        for style in AppThemeStyle.allCases {
+            let palette = AppTheme.palette(for: style)
+            for surface in [palette.panelBackgroundTopToken, palette.elevatedSurfaceToken] {
+                for text in [palette.strongTextToken, palette.secondaryTextToken] {
+                    #expect(contrast(text, on: surface) >= 4.5)
+                }
+            }
+            #expect(contrast(palette.onTintToken, on: palette.brandToken) >= 4.5)
+            for text in [palette.warningToken, palette.positiveToken, palette.supportingToken] {
+                #expect(contrast(text, on: palette.elevatedSurfaceToken) >= 4.5)
+            }
+        }
     }
 
     @Test
-    func appThemeUsesWarmLightPalette() {
+    func appearancePreservesPulseBarColorRoles() {
         let warm = AppTheme.palette(for: .warm)
+        let cool = AppTheme.palette(for: .light)
+        let dark = AppTheme.palette(for: .dark)
+        #expect(warm.brandToken.red > warm.brandToken.green)
+        #expect(warm.positiveToken.green > warm.positiveToken.red)
+        #expect(cool.brandToken.green > cool.brandToken.red)
+        #expect(dark.brandToken.green > dark.brandToken.red)
+        #expect(dark.isDark && !warm.isDark && !cool.isDark)
+        // Keep the stored light preference compatible while presenting the cool palette.
+        #expect(AppThemeStyle(rawValue: "light") == .light)
+        #expect(AppThemeStyle.light.displayTitle == "Cool")
+    }
 
-        #expect(warm.panelBackgroundTopToken == ThemeColorToken(red: 0.98, green: 0.95, blue: 0.91))
-        #expect(warm.panelBackgroundBottomToken == ThemeColorToken(red: 0.94, green: 0.89, blue: 0.83))
-        #expect(warm.elevatedSurfaceToken == ThemeColorToken(red: 0.99, green: 0.97, blue: 0.95))
-        #expect(warm.strongTextToken == ThemeColorToken(red: 0.24, green: 0.18, blue: 0.14, opacity: 0.96))
-        #expect(warm.codeBlockFillToken == ThemeColorToken(red: 0.96, green: 0.93, blue: 0.89, opacity: 0.98))
+    @Test
+    func oklchNeutralConversionHasNoColorCast() {
+        let white = ThemeColorToken(1, 0, 0)
+        let black = ThemeColorToken(0, 0, 0)
+        #expect(abs(white.red - 1) < 0.00001)
+        #expect(abs(white.green - 1) < 0.00001)
+        #expect(abs(white.blue - 1) < 0.00001)
+        #expect(black == ThemeColorToken(red: 0, green: 0, blue: 0))
     }
 
     @Test
@@ -49,5 +71,19 @@ struct AppThemeTests {
         #expect(warm.panelBackgroundTopToken != light.panelBackgroundTopToken)
         #expect(light.panelBackgroundTopToken != dark.panelBackgroundTopToken)
         #expect(warm.strongTextToken != dark.strongTextToken)
+    }
+
+    private func contrast(_ foreground: ThemeColorToken, on background: ThemeColorToken) -> Double {
+        func luminance(_ values: [Double]) -> Double {
+            let linear = values.map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
+            return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
+        }
+        let bg = [background.red, background.green, background.blue]
+        let fg = zip([foreground.red, foreground.green, foreground.blue], bg).map {
+            $0 * foreground.opacity + $1 * (1 - foreground.opacity)
+        }
+        let first = luminance(fg)
+        let second = luminance(bg)
+        return (max(first, second) + 0.05) / (min(first, second) + 0.05)
     }
 }

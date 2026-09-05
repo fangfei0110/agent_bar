@@ -329,6 +329,17 @@ struct ProviderVersionSnapshot: Identifiable, Equatable, Sendable {
         }
     }
 
+    var automaticUpdateCommand: [String]? {
+        guard let executablePath,
+              var command = provider.packageManagerUpdateCommand(for: installSource, executablePath: executablePath),
+              let manager = command.first else { return nil }
+        // Use the same installation's manager, not a different Node version on PATH.
+        let sibling = URL(fileURLWithPath: executablePath).deletingLastPathComponent().appendingPathComponent(manager).path
+        guard FileManager.default.isExecutableFile(atPath: sibling) else { return nil }
+        command[0] = sibling
+        return command
+    }
+
     var currentTitle: String {
         currentVersion ?? (isInstalled ? "Unknown" : "Not installed")
     }

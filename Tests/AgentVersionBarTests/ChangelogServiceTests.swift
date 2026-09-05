@@ -56,10 +56,37 @@ struct ChangelogServiceTests {
         let command = ChangelogService.summaryCommand(for: request)
 
         #expect(command != nil)
-        #expect(command?.contains("--cli") == true)
+        #expect(command?.contains("exec") == true)
         #expect(command?.contains("codex") == true)
-        #expect(command?.contains("--prompt") == true)
+        #expect(command?.contains("--model") == false)
+        #expect(command?.contains("-m") == false)
+        #expect(command?.contains("read-only") == true)
+        #expect(command?.contains("--ephemeral") == true)
         #expect(command?.contains("-") == true)
+    }
+
+    @Test func githubNavigationIsRemovedAndVersionHeadingsAreRecognized() {
+        let extracted = "Navigation\n# Releases: openai/codex\n## Release list\n* links\n## 0.153.4\n[0.153.4](/releases/tag/v0.153.4)\nFix A\n## 0.153.3\n[0.153.3](/releases/tag/v0.153.3)\nFix B\n## 0.153.2\nFix C"
+        let cleaned = ChangelogService.cleanExtractedContent(extracted)
+        #expect(cleaned.hasPrefix("## 0.153.4"))
+        let sections = ChangelogService.latestVersionSections(from: cleaned)
+        #expect(sections.contains("Fix A"))
+        #expect(sections.contains("Fix B"))
+        #expect(!sections.contains("Fix C"))
+        #expect(ChangelogService.cleanExtractedContent("# Changelog\nNotes") == "# Changelog\nNotes")
+    }
+
+    @Test func codexReceivesSummaryPromptAndSourceWithoutModelOverride() async throws {
+        let request = ChangelogRequest(provider: .codexCli, currentVersion: "1.0.0", latestVersion: "1.1.0", sourceURL: URL(string: "https://example.com"))!
+        let loader = LiveChangelogLoader { command, input in
+            if command.first == "/usr/bin/which" { return CommandOutput(exitCode: 0, stdout: "/test/cli", stderr: "") }
+            #expect(command.contains("codex"))
+            #expect(!command.contains("gpt-5.2"))
+            #expect(input?.contains(ChangelogService.summaryPrompt(for: request)) == true)
+            #expect(input?.contains("Release note fixture") == true)
+            return CommandOutput(exitCode: 0, stdout: "Summary fixture", stderr: "")
+        }
+        #expect(try await loader.summarize(request: request, sourceContent: "Release note fixture") == "Summary fixture")
     }
 
     @Test
